@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <!-- Windows-only Tool: -windows-TFM liefert volle Microsoft.VisualBasic
+             (Recycle Bin) + Microsoft.Win32.Registry. net8.0 = installiertes LTS-SDK. -->
+        <TargetFramework>net8.0-windows</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- WMI-Zugriff für System-Wiederherstellungspunkte -->
+        <PackageReference Include="System.Management" Version="8.0.0" />
+    </ItemGroup>
+
+</Project>
