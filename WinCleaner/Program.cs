@@ -1,4 +1,7 @@
-﻿using WinCleaner.Core;
+﻿using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using WinCleaner.Core;
 using WinCleaner.SystemTools;
 using WinCleaner.Util;
 
@@ -6,9 +9,17 @@ namespace WinCleaner;
 
 public class Program
 {
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // lesbare Pfade statt "
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public static int Main(string[] args)
     {
         var logger = new Logger();
+        bool json = args.Contains("--json");
 
         if (args.Length == 0)
         {
@@ -24,6 +35,11 @@ public class Program
                 {
                     var scanner = new JunkScanner(logger);
                     var report = scanner.Scan();
+                    if (json)
+                    {
+                        OutputJson(new { report.TotalFiles, report.TotalBytes, report.Items });
+                        break;
+                    }
                     ConsoleTable.From(
                         report.Items.Select(i => new[] {
                             i.Category, i.Path, i.FileCount.ToString(),
@@ -52,6 +68,11 @@ public class Program
                     var analyzer = new DiskAnalyzer(logger);
                     var analysis = analyzer.Analyze(args[1], topN: 25);
                     long total = analysis.TotalBytes;
+                    if (json)
+                    {
+                        OutputJson(new { analysis.TotalBytes, analysis.Entries });
+                        break;
+                    }
                     var rows = analysis.Entries.Select(e => new[]
                     {
                         e.IsDir ? "Ordner" : "Datei",
@@ -70,6 +91,12 @@ public class Program
                     bool delete = args.Contains("--delete");
                     var finder = new DuplicateFinder(logger);
                     var groups = finder.Find(args[1]);
+                    if (json)
+                    {
+                        OutputJson(groups);
+                        if (delete) finder.DeleteDuplicates(groups);
+                        break;
+                    }
                     foreach (var g in groups)
                     {
                         Console.WriteLine($"\nHASH {g.Hash}  Dateien: {g.Files.Count}  Gesamt: {(g.TotalBytes/(1024*1024.0)):N1} MB");
@@ -86,6 +113,11 @@ public class Program
                 {
                     var sm = new StartupManager(logger);
                     var items = sm.List();
+                    if (json)
+                    {
+                        OutputJson(items);
+                        break;
+                    }
                     ConsoleTable.From(
                         items.Select(i => new[] { i.Source, i.Name, i.Path, i.Enabled ? "Ja" : "Nein" }),
                         "Quelle","Name","Pfad","Aktiv"
@@ -96,8 +128,17 @@ public class Program
                 {
                     if (args.Length < 2) { Console.WriteLine("Name fehlt: startup-disable <Name>"); return 1; }
                     var sm = new StartupManager(logger);
-                    sm.Disable(string.Join(' ', args.Skip(1)));
-                    break;
+                    var name = string.Join(' ', args.Skip(1).Where(a => !a.StartsWith("--")));
+                    var result = sm.Disable(name);
+
+                    if (result == DisableResult.NeedsAdmin && !Elevation.IsAdministrator())
+                    {
+                        logger.Info("Starte mit Rechteerhöhung neu (UAC)...");
+                        return Elevation.RelaunchAsAdmin(args, logger) ? 0 : 1;
+                    }
+
+                    PauseIfRelaunched(args);
+                    return result is DisableResult.Success or DisableResult.AlreadyDisabled ? 0 : 1;
                 }
                 case "create-restore-point":
                 {
@@ -119,12 +160,7 @@ public class Program
                         ? "Wiederherstellungspunkt erstellt."
                         : "Fehlgeschlagen (Systemschutz aktiv? Adminrechte?).");
 
-                    // Eleviertes Fenster offen halten, damit das Ergebnis lesbar bleibt.
-                    if (args.Contains(Elevation.RelaunchFlag))
-                    {
-                        Console.WriteLine("\nTaste drücken zum Schließen...");
-                        try { Console.ReadKey(true); } catch { /* keine interaktive Konsole */ }
-                    }
+                    PauseIfRelaunched(args);
                     break;
                 }
                 case "schedule-clean":
@@ -153,6 +189,17 @@ public class Program
         }
     }
 
+    private static void OutputJson(object data)
+        => Console.WriteLine(JsonSerializer.Serialize(data, JsonOpts));
+
+    // Eleviertes Fenster offen halten, damit das Ergebnis lesbar bleibt.
+    private static void PauseIfRelaunched(string[] args)
+    {
+        if (!args.Contains(Elevation.RelaunchFlag)) return;
+        Console.WriteLine("\nTaste drücken zum Schließen...");
+        try { Console.ReadKey(true); } catch { /* keine interaktive Konsole */ }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -169,6 +216,10 @@ Befehle:
   schedule-clean daily|weekly        Automatische Bereinigung planen
   unschedule-clean                   Geplante Bereinigung entfernen
   help                               Diese Hilfe anzeigen
+
+Optionen:
+  --json   Maschinenlesbare Ausgabe (scan-junk, analyze-disk,
+           find-duplicates, startup-list)
 """);
     }
 }

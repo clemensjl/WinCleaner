@@ -4,6 +4,8 @@ namespace WinCleaner.SystemTools;
 
 public record StartupItem(string Source, string Name, string Path, bool Enabled);
 
+public enum DisableResult { Success, AlreadyDisabled, NotFound, NeedsAdmin, Failed }
+
 /// <summary>
 /// Liest und verwaltet Autostart-Einträge aus Registry-Run-Keys und den
 /// Startup-Ordnern. Der Aktiv/Inaktiv-Status wird – wie im Task-Manager –
@@ -39,7 +41,7 @@ public class StartupManager
         return items;
     }
 
-    public void Disable(string name)
+    public DisableResult Disable(string name)
     {
         // Passenden Eintrag über alle Quellen suchen (Name case-insensitive).
         var match = List().FirstOrDefault(i =>
@@ -48,16 +50,17 @@ public class StartupManager
         if (match is null)
         {
             _logger.Error($"Kein Autostart-Eintrag mit Name \"{name}\" gefunden.");
-            return;
+            return DisableResult.NotFound;
         }
 
         if (!match.Enabled)
         {
             _logger.Info($"\"{match.Name}\" ist bereits deaktiviert.");
-            return;
+            return DisableResult.AlreadyDisabled;
         }
 
         // Ziel-StartupApproved-Schlüssel + Wertname je nach Quelle bestimmen.
+        bool needsAdmin = match.Source is "Registry HKLM" or "Registry HKLM (WOW64)" or "Startup-Ordner (Common)";
         (RegistryKey root, string approvedSub, string valueName) target = match.Source switch
         {
             "Registry HKCU"          => (Registry.CurrentUser,  ApprovedRun,   match.Name),
@@ -69,24 +72,34 @@ public class StartupManager
             _ => (Registry.CurrentUser, ApprovedRun, match.Name)
         };
 
+        // HKLM-/Common-Ziele brauchen Adminrechte -> Aufrufer kann elevieren.
+        if (needsAdmin && !Elevation.IsAdministrator())
+        {
+            _logger.Info($"\"{match.Name}\" liegt in {match.Source} – Adminrechte nötig.");
+            return DisableResult.NeedsAdmin;
+        }
+
         try
         {
             using var key = target.root.CreateSubKey(target.approvedSub, writable: true);
             if (key is null)
             {
                 _logger.Error($"StartupApproved-Schlüssel nicht beschreibbar (Adminrechte für {match.Source}?).");
-                return;
+                return DisableResult.NeedsAdmin;
             }
             key.SetValue(target.valueName, BuildDisabledBlob(), RegistryValueKind.Binary);
             _logger.Info($"Autostart \"{match.Name}\" deaktiviert ({match.Source}).");
+            return DisableResult.Success;
         }
         catch (UnauthorizedAccessException)
         {
             _logger.Error($"Keine Berechtigung – \"{match.Source}\" erfordert Adminrechte.");
+            return DisableResult.NeedsAdmin;
         }
         catch (Exception ex)
         {
             _logger.Error($"Deaktivieren fehlgeschlagen: {ex.Message}");
+            return DisableResult.Failed;
         }
     }
 

@@ -13,6 +13,7 @@ public class Logger
 
     private void Write(string level, string msg)
     {
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {level}  {msg}");
+        // Diagnostik nach stderr, damit stdout (Tabellen/JSON) maschinenlesbar bleibt.
+        Console.Error.WriteLine($"[{DateTime.Now:HH:mm:ss}] {level}  {msg}");
     }
 }
