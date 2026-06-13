@@ -50,8 +50,18 @@ public class Program
                 {
                     if (args.Length < 2) { Console.WriteLine("Pfad fehlt: analyze-disk <Pfad>"); return 1; }
                     var analyzer = new DiskAnalyzer(logger);
-                    var rows = analyzer.Analyze(args[1], topN: 25);
-                    ConsoleTable.From(rows, "Typ","Pfad/Name","Größe (MB)","Anzahl").Write();
+                    var analysis = analyzer.Analyze(args[1], topN: 25);
+                    long total = analysis.TotalBytes;
+                    var rows = analysis.Entries.Select(e => new[]
+                    {
+                        e.IsDir ? "Ordner" : "Datei",
+                        e.Path,
+                        DiskAnalyzer.FormatSize(e.Bytes),
+                        e.Files.ToString(),
+                        total > 0 ? $"{(e.Bytes * 100.0 / total):N1}%" : "-"
+                    });
+                    ConsoleTable.From(rows, "Typ","Pfad/Name","Größe","Dateien","%").Write();
+                    Console.WriteLine($"\nGesamt (Top-Level): {DiskAnalyzer.FormatSize(total)}");
                     break;
                 }
                 case "find-duplicates":
@@ -91,12 +101,30 @@ public class Program
                 }
                 case "create-restore-point":
                 {
-                    string name = args.Length >= 2 ? string.Join(' ', args.Skip(1)) : $"WinCleaner {DateTime.Now:yyyy-MM-dd HH:mm}";
+                    // Wiederherstellungspunkte brauchen Adminrechte -> ggf. eleviert neu starten.
+                    if (!Elevation.IsAdministrator())
+                    {
+                        logger.Info("Adminrechte nötig – starte mit Rechteerhöhung neu (UAC)...");
+                        return Elevation.RelaunchAsAdmin(args, logger) ? 0 : 1;
+                    }
+
+                    var nameParts = args.Skip(1).Where(a => !a.StartsWith("--"));
+                    string name = nameParts.Any()
+                        ? string.Join(' ', nameParts)
+                        : $"WinCleaner {DateTime.Now:yyyy-MM-dd HH:mm}";
+
                     var rp = new RestorePoint(logger);
                     bool ok = rp.Create(name);
                     Console.WriteLine(ok
                         ? "Wiederherstellungspunkt erstellt."
                         : "Fehlgeschlagen (Systemschutz aktiv? Adminrechte?).");
+
+                    // Eleviertes Fenster offen halten, damit das Ergebnis lesbar bleibt.
+                    if (args.Contains(Elevation.RelaunchFlag))
+                    {
+                        Console.WriteLine("\nTaste drücken zum Schließen...");
+                        try { Console.ReadKey(true); } catch { /* keine interaktive Konsole */ }
+                    }
                     break;
                 }
                 case "schedule-clean":
