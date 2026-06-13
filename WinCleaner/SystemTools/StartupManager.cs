@@ -177,10 +177,10 @@ public class StartupManager
     }
 
     // Erstes Byte ungerade (Bit 0 gesetzt) => deaktiviert. Aktiv ist typ. 0x02.
-    private static bool IsDisabledBlob(byte[] blob) => (blob[0] & 1) == 1;
+    internal static bool IsDisabledBlob(byte[] blob) => (blob[0] & 1) == 1;
 
     // 12-Byte-Blob: DWORD-Status 0x03 (deaktiviert) + 8-Byte-FILETIME des Zeitpunkts.
-    private static byte[] BuildDisabledBlob()
+    internal static byte[] BuildDisabledBlob()
     {
         var blob = new byte[12];
         blob[0] = 0x03;

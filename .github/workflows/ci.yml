@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build-test:
+    # net8.0-windows -> Windows-Runner nötig (Microsoft.VisualBasic, Registry, WMI).
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore WinCleaner.sln
+
+      - name: Build
+        run: dotnet build WinCleaner.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test WinCleaner.sln -c Release --no-build --verbosity normal
