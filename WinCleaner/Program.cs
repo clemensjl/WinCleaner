@@ -55,6 +55,14 @@ public class Program
                     bool dryRun = !args.Contains("--no-dry-run");
                     var scanner = new JunkScanner(logger);
                     var report = scanner.Scan();
+
+                    // Vor echter Bereinigung bestätigen lassen (außer --yes).
+                    if (!dryRun && !args.Contains("--yes") && !ConfirmClean(report))
+                    {
+                        Console.WriteLine("Abgebrochen.");
+                        return 1;
+                    }
+
                     var cleaner = new JunkCleaner(logger);
                     cleaner.Clean(report, dryRun: dryRun, sendToRecycleBin: true);
                     Console.WriteLine(dryRun
@@ -192,6 +200,28 @@ public class Program
     private static void OutputJson(object data)
         => Console.WriteLine(JsonSerializer.Serialize(data, JsonOpts));
 
+    // Bestätigung vor echtem Löschen. Nur "Safe"-Einträge werden bereinigt.
+    private static bool ConfirmClean(JunkReport report)
+    {
+        var safe = report.Items.Where(i => i.Safety == Safety.Safe).ToList();
+        long bytes = safe.Sum(i => i.TotalBytes);
+        int files = safe.Sum(i => i.FileCount);
+
+        Console.WriteLine($"\n{files} Dateien ({DiskAnalyzer.FormatSize(bytes)}) werden in den " +
+                          $"Papierkorb verschoben (nur als sicher eingestufte Kategorien).");
+
+        // Nicht-interaktiv ohne --yes: kein Rückfragekanal -> sicher abbrechen.
+        if (Console.IsInputRedirected)
+        {
+            Console.WriteLine("Keine interaktive Konsole. Mit --yes bestätigen.");
+            return false;
+        }
+
+        Console.Write("Fortfahren? [j/N] ");
+        var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
+        return answer is "j" or "ja" or "y" or "yes";
+    }
+
     // Eleviertes Fenster offen halten, damit das Ergebnis lesbar bleibt.
     private static void PauseIfRelaunched(string[] args)
     {
@@ -207,7 +237,7 @@ WinCleaner (CLI)
 
 Befehle:
   scan-junk                          Junk-Dateien auflisten (kein Löschen)
-  clean-junk [--no-dry-run]          Bereinigen (Standard: Dry-Run)
+  clean-junk [--no-dry-run] [--yes]  Bereinigen (Standard: Dry-Run; --yes überspringt Abfrage)
   analyze-disk <Pfad>                Größte Ordner/Dateien anzeigen
   find-duplicates <Pfad> [--delete]  Doppelte Dateien finden/löschen
   startup-list                       Autostart-Einträge auflisten
