@@ -5,6 +5,68 @@ All notable changes to WinCleaner are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-17
+
+Major feature release. The command set grows from 9 to 26 commands, derived from
+a competitor / feature-gap analysis (`docs/research/`). Every new
+system-modifying command follows the safety model: dry-run by default, reversible
+where possible, irreversible only on explicit opt-in.
+
+### Added
+- **`browser-clean`** — per-browser/per-profile cache cleaning
+  (Chrome/Edge/Brave/Firefox); cookies/history/sessions opt-in; dry-run → recycle bin.
+- **`analyze-disk`** options — `--by-type` (group by extension), filters
+  (`--min-size`, `--type`, `--age-days`, `--depth`, `--top`) and
+  `--export csv|html` (`--out`).
+- **`find-duplicates`** options — `--keep oldest|newest|shortest-path|longest-path`,
+  `--protect <path>` (reference folders never touched) and `--hard-link`
+  (replace duplicates with NTFS hard links instead of deleting).
+- **`scan-extras`** — find empty folders, 0-byte files and broken
+  shortcuts/symlinks; optional delete to recycle bin.
+- **`shred`** / **`wipe-free-space`** — secure multi-pass overwrite (file/folder)
+  and free-space wiping; irreversible, opt-in only, SSD warning.
+- **`list-programs`** / **`uninstall`** — installed-program inventory and
+  UninstallString-based uninstall (MSI/NSIS/Inno silent detection; restore point
+  first; leftover removal needs explicit consent).
+- **`debloat`** — remove a curated, conservative set of preinstalled Store apps;
+  dry-run default; restore point first.
+- **`list-updates`** / **`update`** / **`install`** / **`schedule-update`** —
+  `winget` wrappers for package updates.
+- **`services`** — list and reversibly change service start type (registry
+  backup + undo), incl. a conservative `safe-disable` profile.
+- **`scan-privacy`** / **`privacy`** — read-only privacy audit and reversible
+  telemetry/tracking/AI (Copilot/Recall) tweaks; restore point before
+  machine-wide changes.
+- **`block-telemetry`** — reversible, marked `hosts`-file section (with backup)
+  blocking a conservative list of telemetry hosts.
+
+### Changed
+- **Architecture**: introduced an `ICommand` + reflection-based `CommandRegistry`.
+  Each command is now a self-contained file; `Program.cs` is a thin dispatcher and
+  the help is generated from the registry. Existing commands were migrated with no
+  behavior change (version, per-command help, flag validation, stderr prompts,
+  duplicate-delete confirmation all preserved).
+- Shared infrastructure added: `TweakEngine` (reversible registry tweaks with
+  JSON backup/undo), `RecycleBinHelper`, `JsonOut`, `Prompt`, `AppInfo`.
+- `--json` commands now emit a single JSON document per run (no concatenated
+  objects), including in real-action paths.
+- Test suite expanded from 39 to 65 tests.
+
+### Fixed
+- `analyze-disk --depth ≥ 2` no longer double-counts `TotalBytes` (parent and
+  child folders were both summed); totals now come from a single non-overlapping
+  root measurement.
+- `find-duplicates --keep newest` no longer keeps an unreadable/locked file by
+  mistake (unreadable timestamps now sort last for both `newest` and `oldest`).
+- `uninstall` leftover scan no longer offers a publisher's shared AppData folder
+  (e.g. `Mozilla`, `Microsoft`) as a deletion candidate — prevents data loss for
+  other still-installed programs; leftover removal always requires its own
+  confirmation even with `--yes`.
+- `scan-extras --delete` now removes broken **directory** symlinks/junctions
+  (previously only files were handled).
+- `winget` table parsing is locale-tolerant (German `ID` header) and no longer
+  pollutes the available-version value when the source column is absent.
+
 ## [1.0.1] - 2026-06-17
 
 ### Changed
