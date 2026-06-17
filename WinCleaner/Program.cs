@@ -1,4 +1,5 @@
-﻿using System.Text.Encodings.Web;
+using System.Reflection;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinCleaner.Core;
@@ -16,10 +17,37 @@ public class Program
         Converters = { new JsonStringEnumConverter() }
     };
 
+    // Erlaubte Optionen je Befehl. --relaunched/--help werden global zugelassen.
+    private static readonly Dictionary<string, string[]> AllowedFlags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["scan-junk"]            = new[] { "--json" },
+        ["clean-junk"]           = new[] { "--no-dry-run", "--yes" },
+        ["analyze-disk"]         = new[] { "--json" },
+        ["find-duplicates"]      = new[] { "--delete", "--json", "--yes" },
+        ["startup-list"]         = new[] { "--json" },
+        ["startup-disable"]      = Array.Empty<string>(),
+        ["create-restore-point"] = Array.Empty<string>(),
+        ["schedule-clean"]       = Array.Empty<string>(),
+        ["unschedule-clean"]     = Array.Empty<string>(),
+    };
+
+    // Kurz-Hilfe je Befehl (für `help <cmd>`, `<cmd> --help` und Fehlermeldungen).
+    private static readonly Dictionary<string, string> Usage = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["scan-junk"]            = "scan-junk [--json]\n  Junk-Dateien auflisten (kein Löschen).",
+        ["clean-junk"]           = "clean-junk [--no-dry-run] [--yes]\n  Bereinigen. Standard: Dry-Run. --no-dry-run löscht (Papierkorb) nach Rückfrage, --yes überspringt sie.",
+        ["analyze-disk"]         = "analyze-disk <Pfad> [--json]\n  Größte Ordner/Dateien unter <Pfad> anzeigen.",
+        ["find-duplicates"]      = "find-duplicates <Pfad> [--delete] [--yes] [--json]\n  Inhaltsgleiche Dateien finden. --delete verschiebt Duplikate in den Papierkorb (je Gruppe bleibt eine), --yes ohne Rückfrage.",
+        ["startup-list"]         = "startup-list [--json]\n  Autostart-Einträge auflisten.",
+        ["startup-disable"]      = "startup-disable <Name>\n  Autostart-Eintrag reversibel deaktivieren (UAC für systemweite Einträge).",
+        ["create-restore-point"] = "create-restore-point [Name]\n  System-Wiederherstellungspunkt erstellen (Admin, Systemschutz aktiv).",
+        ["schedule-clean"]       = "schedule-clean daily|weekly\n  Automatische Bereinigung um 03:00 einrichten.",
+        ["unschedule-clean"]     = "unschedule-clean\n  Geplante Bereinigung entfernen.",
+    };
+
     public static int Main(string[] args)
     {
         var logger = new Logger();
-        bool json = args.Contains("--json");
 
         if (args.Length == 0)
         {
@@ -27,9 +55,40 @@ public class Program
             return 0;
         }
 
+        string cmd = args[0].ToLowerInvariant();
+
+        // Version (Befehl oder Top-Level-Flag).
+        if (cmd is "version" or "--version")
+        {
+            Console.WriteLine($"WinCleaner {AppVersion}");
+            return 0;
+        }
+
+        // Hilfe: "help", "help <cmd>", "--help"/"-h".
+        if (cmd is "help" or "--help" or "-h")
+        {
+            if (args.Length > 1 && Usage.TryGetValue(args[1].ToLowerInvariant(), out var sub))
+                Console.WriteLine(sub);
+            else
+                PrintHelp();
+            return 0;
+        }
+        // "<cmd> --help" nur als Hilfe behandeln, wenn der Befehl bekannt ist;
+        // sonst (unbekannter Befehl) durchfallen lassen -> Exit-Code 1.
+        if ((args.Contains("--help") || args.Contains("-h")) && Usage.TryGetValue(cmd, out var cmdUsage))
+        {
+            Console.WriteLine(cmdUsage);
+            return 0;
+        }
+
+        // Unbekannte Optionen früh ablehnen (z. B. Tippfehler --no-dryrun).
+        if (!ValidateFlags(cmd, args, logger)) return 1;
+
+        bool json = args.Contains("--json");
+
         try
         {
-            switch (args[0].ToLowerInvariant())
+            switch (cmd)
             {
                 case "scan-junk":
                 {
@@ -59,7 +118,7 @@ public class Program
                     // Vor echter Bereinigung bestätigen lassen (außer --yes).
                     if (!dryRun && !args.Contains("--yes") && !ConfirmClean(report))
                     {
-                        Console.WriteLine("Abgebrochen.");
+                        Console.Error.WriteLine("Abgebrochen.");
                         return 1;
                     }
 
@@ -72,7 +131,7 @@ public class Program
                 }
                 case "analyze-disk":
                 {
-                    if (args.Length < 2) { Console.WriteLine("Pfad fehlt: analyze-disk <Pfad>"); return 1; }
+                    if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine(Usage["analyze-disk"]); return 1; }
                     var analyzer = new DiskAnalyzer(logger);
                     var analysis = analyzer.Analyze(args[1], topN: 25);
                     long total = analysis.TotalBytes;
@@ -95,25 +154,40 @@ public class Program
                 }
                 case "find-duplicates":
                 {
-                    if (args.Length < 2) { Console.WriteLine("Pfad fehlt: find-duplicates <Pfad>"); return 1; }
+                    if (args.Length < 2 || args[1].StartsWith("--")) { Console.Error.WriteLine(Usage["find-duplicates"]); return 1; }
                     bool delete = args.Contains("--delete");
                     var finder = new DuplicateFinder(logger);
                     var groups = finder.Find(args[1]);
+
                     if (json)
                     {
                         OutputJson(groups);
-                        if (delete) finder.DeleteDuplicates(groups);
-                        break;
                     }
-                    foreach (var g in groups)
+                    else
                     {
-                        Console.WriteLine($"\nHASH {g.Hash}  Dateien: {g.Files.Count}  Gesamt: {(g.TotalBytes/(1024*1024.0)):N1} MB");
-                        foreach (var f in g.Files) Console.WriteLine("  " + f);
+                        foreach (var g in groups)
+                        {
+                            Console.WriteLine($"\nHASH {g.Hash}  Dateien: {g.Files.Count}  Gesamt: {(g.TotalBytes/(1024*1024.0)):N1} MB");
+                            foreach (var f in g.Files) Console.WriteLine("  " + f);
+                        }
                     }
+
                     if (delete)
                     {
-                        finder.DeleteDuplicates(groups);
-                        Console.WriteLine("\nDuplikate gelöscht (je Gruppe eine Datei behalten).");
+                        if (groups.Count == 0)
+                        {
+                            if (!json) Console.WriteLine("\nKeine Duplikate zum Löschen.");
+                            break;
+                        }
+                        // Echtes Löschen bestätigen (außer --yes); Prompts nach stderr,
+                        // damit --json-stdout sauber bleibt.
+                        if (!args.Contains("--yes") && !ConfirmDeleteDuplicates(groups))
+                        {
+                            Console.Error.WriteLine("Abgebrochen.");
+                            return 1;
+                        }
+                        finder.DeleteDuplicates(groups); // Standard: Papierkorb
+                        if (!json) Console.WriteLine("\nDuplikate in den Papierkorb verschoben (je Gruppe eine Datei behalten).");
                     }
                     break;
                 }
@@ -134,9 +208,9 @@ public class Program
                 }
                 case "startup-disable":
                 {
-                    if (args.Length < 2) { Console.WriteLine("Name fehlt: startup-disable <Name>"); return 1; }
-                    var sm = new StartupManager(logger);
                     var name = string.Join(' ', args.Skip(1).Where(a => !a.StartsWith("--")));
+                    if (string.IsNullOrWhiteSpace(name)) { Console.Error.WriteLine(Usage["startup-disable"]); return 1; }
+                    var sm = new StartupManager(logger);
                     var result = sm.Disable(name);
 
                     if (result == DisableResult.NeedsAdmin && !Elevation.IsAdministrator())
@@ -173,7 +247,7 @@ public class Program
                 }
                 case "schedule-clean":
                 {
-                    if (args.Length < 2) { Console.WriteLine("Intervall fehlt: schedule-clean daily|weekly"); return 1; }
+                    if (args.Length < 2) { Console.Error.WriteLine(Usage["schedule-clean"]); return 1; }
                     var tsh = new TaskSchedulerHelper(logger);
                     return tsh.CreateScheduledClean(args[1]) ? 0 : 1;
                 }
@@ -182,10 +256,10 @@ public class Program
                     var tsh = new TaskSchedulerHelper(logger);
                     return tsh.RemoveScheduledClean() ? 0 : 1;
                 }
-                case "help":
                 default:
+                    logger.Error($"Unbekannter Befehl: {args[0]}");
                     PrintHelp();
-                    break;
+                    return 1;
             }
             return 0;
         }
@@ -200,6 +274,40 @@ public class Program
     private static void OutputJson(object data)
         => Console.WriteLine(JsonSerializer.Serialize(data, JsonOpts));
 
+    // Informational-/Assembly-Version, ohne Build-Metadaten (+hash).
+    internal static string AppVersion
+    {
+        get
+        {
+            var asm = typeof(Program).Assembly;
+            var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrEmpty(info)) return info.Split('+')[0];
+            return asm.GetName().Version?.ToString() ?? "unbekannt";
+        }
+    }
+
+    // Lehnt unbekannte --Optionen ab; --relaunched/--help/-h sind global erlaubt.
+    internal static bool ValidateFlags(string cmd, string[] args, Logger logger)
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Elevation.RelaunchFlag, "--help", "-h"
+        };
+        if (AllowedFlags.TryGetValue(cmd, out var extra))
+            foreach (var f in extra) allowed.Add(f);
+
+        foreach (var a in args.Skip(1))
+        {
+            if (a.StartsWith("--") && !allowed.Contains(a))
+            {
+                logger.Error($"Unbekannte Option \"{a}\" für Befehl \"{cmd}\".");
+                if (Usage.TryGetValue(cmd, out var u)) Console.Error.WriteLine(u);
+                return false;
+            }
+        }
+        return true;
+    }
+
     // Bestätigung vor echtem Löschen. Nur "Safe"-Einträge werden bereinigt.
     private static bool ConfirmClean(JunkReport report)
     {
@@ -207,17 +315,39 @@ public class Program
         long bytes = safe.Sum(i => i.TotalBytes);
         int files = safe.Sum(i => i.FileCount);
 
-        Console.WriteLine($"\n{files} Dateien ({DiskAnalyzer.FormatSize(bytes)}) werden in den " +
+        Console.Error.WriteLine($"\n{files} Dateien ({DiskAnalyzer.FormatSize(bytes)}) werden in den " +
                           $"Papierkorb verschoben (nur als sicher eingestufte Kategorien).");
 
         // Nicht-interaktiv ohne --yes: kein Rückfragekanal -> sicher abbrechen.
         if (Console.IsInputRedirected)
         {
-            Console.WriteLine("Keine interaktive Konsole. Mit --yes bestätigen.");
+            Console.Error.WriteLine("Keine interaktive Konsole. Mit --yes bestätigen.");
             return false;
         }
 
-        Console.Write("Fortfahren? [j/N] ");
+        Console.Error.Write("Fortfahren? [j/N] ");
+        var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
+        return answer is "j" or "ja" or "y" or "yes";
+    }
+
+    // Bestätigung vor echtem Duplikat-Löschen. Prompts nach stderr -> --json bleibt sauber.
+    private static bool ConfirmDeleteDuplicates(List<DuplicateGroup> groups)
+    {
+        int files = groups.Sum(g => g.Files.Count - 1);
+        long bytes = groups.Sum(g => g.Files.Count > 0
+            ? (g.TotalBytes / g.Files.Count) * (g.Files.Count - 1)
+            : 0);
+
+        Console.Error.WriteLine($"\n{files} doppelte Dateien ({DiskAnalyzer.FormatSize(bytes)}) werden in den " +
+                                "Papierkorb verschoben (je Gruppe bleibt eine erhalten).");
+
+        if (Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine("Keine interaktive Konsole. Mit --yes bestätigen.");
+            return false;
+        }
+
+        Console.Error.Write("Fortfahren? [j/N] ");
         var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
         return answer is "j" or "ja" or "y" or "yes";
     }
@@ -239,17 +369,19 @@ Befehle:
   scan-junk                          Junk-Dateien auflisten (kein Löschen)
   clean-junk [--no-dry-run] [--yes]  Bereinigen (Standard: Dry-Run; --yes überspringt Abfrage)
   analyze-disk <Pfad>                Größte Ordner/Dateien anzeigen
-  find-duplicates <Pfad> [--delete]  Doppelte Dateien finden/löschen
+  find-duplicates <Pfad> [--delete]  Doppelte Dateien finden/löschen (Papierkorb, mit Rückfrage)
   startup-list                       Autostart-Einträge auflisten
   startup-disable <Name>             Autostart-Eintrag deaktivieren
   create-restore-point [Name]        Wiederherstellungspunkt erstellen (Admin)
   schedule-clean daily|weekly        Automatische Bereinigung planen
   unschedule-clean                   Geplante Bereinigung entfernen
-  help                               Diese Hilfe anzeigen
+  version                            Versionsnummer anzeigen
+  help [Befehl]                      Diese Hilfe oder Hilfe zu einem Befehl
 
 Optionen:
   --json   Maschinenlesbare Ausgabe (scan-junk, analyze-disk,
            find-duplicates, startup-list)
+  --help   Hilfe zu einem Befehl (z. B. clean-junk --help)
 """);
     }
 }
