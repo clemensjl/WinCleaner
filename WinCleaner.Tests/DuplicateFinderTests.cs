@@ -53,7 +53,7 @@ public class DuplicateFinderTests
 
         var finder = NewFinder();
         var groups = finder.Find(dir.Path);
-        finder.DeleteDuplicates(groups);
+        finder.DeleteDuplicates(groups, sendToRecycleBin: false); // Test: permanent, kein Papierkorb
 
         // Genau eine Datei pro Gruppe bleibt übrig.
         var first = groups.Single().Files[0];

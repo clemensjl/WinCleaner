@@ -132,18 +132,7 @@ public class JunkScanner
     {
         try
         {
-            if (!Directory.Exists(folder)) return;
-
-            long bytes = 0;
-            int  files = 0;
-
-            // schneller, robust gegen gesperrte Pfade + keine Reparse Points
-            foreach (var file in Directory.EnumerateFiles(folder, "*", DeepOpts))
-            {
-                try { bytes += new FileInfo(file).Length; files++; }
-                catch { /* ignore locked/inaccessible */ }
-            }
-
+            var (bytes, files) = MeasureFolder(folder);
             if (files > 0 && bytes > 0)
                 report.Items.Add(new JunkItem(category, folder, bytes, files, safety));
         }
@@ -151,5 +140,25 @@ public class JunkScanner
         {
             // z. B. Zugriffsfehler – still ignorieren
         }
+    }
+
+    /// <summary>
+    /// Summiert Größe und Anzahl aller Dateien unterhalb <paramref name="folder"/>
+    /// (rekursiv, ohne Reparse Points). Fehlender Pfad oder gesperrte Dateien
+    /// liefern (0, 0) bzw. werden übersprungen.
+    /// </summary>
+    internal static (long bytes, int files) MeasureFolder(string folder)
+    {
+        long bytes = 0;
+        int  files = 0;
+        if (!Directory.Exists(folder)) return (0, 0);
+
+        // schnell, robust gegen gesperrte Pfade + keine Reparse Points
+        foreach (var file in Directory.EnumerateFiles(folder, "*", DeepOpts))
+        {
+            try { bytes += new FileInfo(file).Length; files++; }
+            catch { /* ignore locked/inaccessible */ }
+        }
+        return (bytes, files);
     }
 }

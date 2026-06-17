@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using VB = Microsoft.VisualBasic.FileIO; // Recycle-Bin-Löschung wie im JunkCleaner
 
 namespace WinCleaner.Core;
 
@@ -75,7 +76,12 @@ public class DuplicateFinder
         return result;
     }
 
-    public void DeleteDuplicates(List<DuplicateGroup> groups)
+    /// <summary>
+    /// Löscht je Gruppe alle Dateien außer der ersten. Standardmäßig in den
+    /// Papierkorb (umkehrbar) – konsistent mit <see cref="JunkCleaner"/>; nur für
+    /// Tests kann permanent gelöscht werden.
+    /// </summary>
+    public void DeleteDuplicates(List<DuplicateGroup> groups, bool sendToRecycleBin = true)
     {
         int deleted = 0;
         foreach (var g in groups)
@@ -83,11 +89,20 @@ public class DuplicateFinder
             // Erste Datei behalten, Rest löschen.
             foreach (var f in g.Files.Skip(1))
             {
-                try { File.Delete(f); deleted++; }
+                try
+                {
+                    if (sendToRecycleBin)
+                        VB.FileSystem.DeleteFile(f, VB.UIOption.OnlyErrorDialogs, VB.RecycleOption.SendToRecycleBin);
+                    else
+                        File.Delete(f);
+                    deleted++;
+                }
                 catch (Exception ex) { _logger.Debug($"Löschen fehlgeschlagen {f}: {ex.Message}"); }
             }
         }
-        _logger.Info($"{deleted} Duplikate gelöscht (je Gruppe eine Datei behalten).");
+        _logger.Info(sendToRecycleBin
+            ? $"{deleted} Duplikate in den Papierkorb verschoben (je Gruppe eine Datei behalten)."
+            : $"{deleted} Duplikate gelöscht (je Gruppe eine Datei behalten).");
     }
 
     // ---- Helpers ----

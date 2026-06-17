@@ -15,13 +15,7 @@ public class TaskSchedulerHelper
 
     public bool CreateScheduledClean(string interval)
     {
-        string schedule = interval.ToLowerInvariant() switch
-        {
-            "daily"  or "täglich"     => "/SC DAILY",
-            "weekly" or "wöchentlich" => "/SC WEEKLY /D SUN",
-            _ => ""
-        };
-
+        string schedule = ScheduleSwitch(interval);
         if (schedule.Length == 0)
         {
             _logger.Error($"Unbekanntes Intervall \"{interval}\". Erlaubt: daily | weekly.");
@@ -35,13 +29,28 @@ public class TaskSchedulerHelper
             return false;
         }
 
-        // Aktion: WinCleaner mit echter Bereinigung. Innere Anführungszeichen
-        // escapen, da /TR selbst in Anführungszeichen steht.
-        string action = $"\\\"{exePath}\\\" clean-junk --no-dry-run";
-        string args =
-            $"/Create /TN \"{TaskName}\" /TR \"{action}\" {schedule} /ST 03:00 /F";
+        return RunSchtasks(BuildCreateArgs(schedule, exePath),
+            $"Geplante Bereinigung ({interval}) um 03:00 Uhr eingerichtet.");
+    }
 
-        return RunSchtasks(args, $"Geplante Bereinigung ({interval}) um 03:00 Uhr eingerichtet.");
+    /// <summary>schtasks-Schalter für das Intervall, oder "" bei unbekanntem Wert.</summary>
+    internal static string ScheduleSwitch(string interval) => interval.ToLowerInvariant() switch
+    {
+        "daily"  or "täglich"     => "/SC DAILY",
+        "weekly" or "wöchentlich" => "/SC WEEKLY /D SUN",
+        _ => ""
+    };
+
+    /// <summary>
+    /// Baut die vollständigen schtasks-/Create-Argumente. --yes ist Pflicht, weil der
+    /// geplante Lauf keine interaktive Konsole hat; ohne --yes würde die
+    /// Bestätigungsabfrage in clean-junk den Lauf still abbrechen. Innere
+    /// Anführungszeichen werden escaped, da /TR selbst in Anführungszeichen steht.
+    /// </summary>
+    internal static string BuildCreateArgs(string scheduleSwitch, string exePath)
+    {
+        string action = $"\\\"{exePath}\\\" clean-junk --no-dry-run --yes";
+        return $"/Create /TN \"{TaskName}\" /TR \"{action}\" {scheduleSwitch} /ST 03:00 /F";
     }
 
     public bool RemoveScheduledClean()

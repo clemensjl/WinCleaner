@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master, main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -26,3 +27,49 @@ jobs:
 
       - name: Test
         run: dotnet test WinCleaner.sln -c Release --no-build --verbosity normal
+
+      - name: Publish (self-contained single-file win-x64)
+        run: >
+          dotnet publish WinCleaner/WinCleaner.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinCleaner-win-x64
+          path: publish/WinCleaner.exe
+          if-no-files-found: error
+
+  # Auf Versions-Tag (v1.0.0 …) ein GitHub-Release mit der gebauten .exe anlegen.
+  release:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish (self-contained single-file win-x64)
+        run: >
+          dotnet publish WinCleaner/WinCleaner.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/WinCleaner.exe
+          generate_release_notes: true
