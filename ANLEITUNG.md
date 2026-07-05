@@ -22,7 +22,23 @@ Das zeigt alle Befehle. Hilfe zu einem einzelnen Befehl:
 WinCleaner clean-junk --help
 ```
 
-## Am einfachsten: das Menü
+## Am einfachsten: die grafische Oberfläche
+
+Seit **v2.0.0** gibt es ein echtes Fenster-Programm — kein Terminal. Starte es
+über die Verknüpfung **„WinCleaner (GUI)"** auf dem Desktop bzw. im Startmenü
+(oder `WinCleanerGui.exe` im Installationsordner). Links die Bereiche
+(Übersicht, Aufräumen, Speicher, Programme, Autostart & Dienste, Privatsphäre,
+Sicher löschen, System), rechts der Inhalt.
+
+Bedienung wie erwartet: **erst scannen** (zeigt nur an, was passieren würde),
+Häkchen setzen, **bereinigen** — und vor jeder löschenden Aktion kommt eine
+Rückfrage. Gelöschtes geht in den Papierkorb, Systemänderungen sind umkehrbar.
+Nur der rot markierte Bereich „Sicher löschen" ist endgültig.
+
+**An die Taskleiste anheften:** GUI starten, dann Rechtsklick auf das
+WinCleaner-Symbol in der Taskleiste → „An Taskleiste anheften".
+
+## Auch möglich: das Menü im Terminal
 
 Wer sich keine Befehle merken will, tippt einfach:
 

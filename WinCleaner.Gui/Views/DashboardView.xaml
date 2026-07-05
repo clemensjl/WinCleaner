@@ -1,0 +1,58 @@
+<UserControl x:Class="WinCleaner.Gui.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="28,24,28,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="Übersicht" Style="{StaticResource H1}" />
+            <TextBlock Text="Ein schneller, rein lesender Blick auf den Systemzustand."
+                       Style="{StaticResource Muted}" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <Button Grid.Row="0" Content="Aktualisieren" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Style="{StaticResource SecondaryButton}" Command="{Binding RefreshCommand}" />
+
+        <UniformGrid Grid.Row="1" Rows="1" Columns="3" Margin="0,22,0,0">
+            <Border Style="{StaticResource Card}" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="JUNK" Style="{StaticResource Eyebrow}" />
+                    <TextBlock Text="{Binding JunkValue}" Style="{StaticResource Metric}" Margin="0,6,0,0" />
+                    <Border Height="2" Width="34" Background="{DynamicResource Accent}"
+                            HorizontalAlignment="Left" Margin="0,8,0,8" />
+                    <TextBlock Text="{Binding JunkSub}" Style="{StaticResource Muted}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="4,0,4,0">
+                <StackPanel>
+                    <TextBlock Text="AUTOSTART" Style="{StaticResource Eyebrow}" />
+                    <TextBlock Text="{Binding StartupValue}" Style="{StaticResource Metric}" Margin="0,6,0,0" />
+                    <Border Height="2" Width="34" Background="{DynamicResource Accent}"
+                            HorizontalAlignment="Left" Margin="0,8,0,8" />
+                    <TextBlock Text="{Binding StartupSub}" Style="{StaticResource Muted}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="8,0,0,0">
+                <StackPanel>
+                    <TextBlock Text="PRIVATSPHÄRE" Style="{StaticResource Eyebrow}" />
+                    <TextBlock Text="{Binding PrivacyValue}" Style="{StaticResource Metric}" Margin="0,6,0,0" />
+                    <Border Height="2" Width="34" Background="{DynamicResource Accent}"
+                            HorizontalAlignment="Left" Margin="0,8,0,8" />
+                    <TextBlock Text="{Binding PrivacySub}" Style="{StaticResource Muted}" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <Border Grid.Row="2" Style="{StaticResource Card}" VerticalAlignment="Top" Margin="0,16,0,0">
+            <StackPanel>
+                <TextBlock Text="Sicherheit zuerst" Style="{StaticResource H2}" />
+                <TextBlock Style="{StaticResource Muted}" Margin="0,8,0,0"
+                           Text="Nichts wird ohne Bestätigung verändert. Gelöschtes geht in den Papierkorb, Systemänderungen sind umkehrbar, und vor größeren Eingriffen entsteht ein Wiederherstellungspunkt. Nur „Sicher löschen“ ist endgültig – und deutlich gekennzeichnet." />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

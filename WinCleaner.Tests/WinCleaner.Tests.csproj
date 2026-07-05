@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WinCleaner\WinCleaner.csproj" />
+    <ProjectReference Include="..\WinCleaner.Gui\WinCleaner.Gui.csproj" />
   </ItemGroup>
 
   <ItemGroup>

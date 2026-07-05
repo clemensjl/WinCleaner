@@ -5,6 +5,38 @@ All notable changes to WinCleaner are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-05
+
+Adds a real graphical desktop application (**WinCleaner.Gui**, WPF) alongside
+the CLI and the text menu. A window — no terminal — with a dark/light
+instrument-panel design that follows the Windows theme. The CLI and TUI are
+unchanged; the GUI is an additional frontend over the same Core logic.
+
+### Added
+- **WinCleaner.Gui** — WPF desktop app (`net8.0-windows`, `WinExe`, no console
+  window). Left navigation over eight pages covering all commands: Übersicht
+  (dashboard readout), Aufräumen (junk), Speicher (disk analysis + duplicates),
+  Programme (inventory, uninstall, debloat, updates), Autostart & Dienste,
+  Privatsphäre (audit + apply/undo + telemetry blocking), Sicher löschen
+  (shred / wipe-free-space, clearly marked irreversible), System (restore point,
+  scheduled cleanup).
+- **Preview-first safety in the UI**: read-only scans list what would change;
+  destructive actions need an explicit confirmation, delete to the recycle bin,
+  and reverse via undo. `shred` / `wipe-free-space` are red-flagged with an
+  extra warning dialog.
+- **Direct Core reuse**: non-admin operations call the Core/SystemTools classes
+  in a background thread (UI never freezes); admin operations are delegated to
+  the hardened CLI via UAC, so the proven elevation/restore-point path is reused.
+- App icon and Start-menu/Desktop shortcuts; the window is a normal app, so it
+  can be pinned to the taskbar by right-click.
+
+### Changed
+- `Core.Logger` gained an optional message sink (`Action<string,string>`) so the
+  GUI can route diagnostics to its status bar. Default stderr behavior is
+  unchanged — CLI and existing tests are unaffected.
+- Test suite expanded to 112 tests (adds CommandLineToArgvW-safe argument
+  quoting tests for the GUI).
+
 ## [1.3.0] - 2026-07-05
 
 ### Added

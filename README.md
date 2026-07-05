@@ -12,6 +12,12 @@ software updates, and more — without bundling, telemetry, or a resident servic
 
 > 🇩🇪 **Deutsche Schnellstart-Anleitung:** [ANLEITUNG.md](ANLEITUNG.md)
 
+> 🖥️ **v2.0.0** adds a real graphical desktop app (**WinCleaner.Gui**, WPF) next
+> to the CLI and the text menu — a window, not a terminal, with a dark/light
+> instrument-panel design and all commands behind eight pages. It reuses the
+> same Core logic (background threads for scans, UAC-delegated CLI for admin
+> actions). The CLI remains the primary scriptable interface.
+
 ## Design principles
 
 - **Scriptable first** — `--json` output, exit codes, stderr-only diagnostics,

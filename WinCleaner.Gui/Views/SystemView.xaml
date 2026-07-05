@@ -1,0 +1,44 @@
+<UserControl x:Class="WinCleaner.Gui.Views.SystemView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="28,24,28,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="System" Style="{StaticResource H1}" />
+
+        <!-- Wiederherstellungspunkt -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,16,0,0">
+            <Grid>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Wiederherstellungspunkt" Style="{StaticResource H2}" />
+                    <TextBlock Style="{StaticResource Muted}" Margin="0,6,0,0"
+                               Text="Sicherungspunkt des Systems anlegen (braucht Adminrechte, UAC)." />
+                </StackPanel>
+                <Button Content="Jetzt erstellen" Style="{StaticResource PrimaryButton}"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Command="{Binding RestorePointCommand}" />
+            </Grid>
+        </Border>
+
+        <!-- Geplante Bereinigung -->
+        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0">
+            <StackPanel>
+                <TextBlock Text="Automatische Bereinigung" Style="{StaticResource H2}" />
+                <TextBlock Style="{StaticResource Muted}" Margin="0,6,0,0"
+                           Text="Junk-Bereinigung als geplante Aufgabe um 03:00 Uhr einrichten oder entfernen." />
+                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                    <Button Content="Wöchentlich planen" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding ScheduleWeeklyCommand}" Margin="0,0,8,0" />
+                    <Button Content="Täglich planen" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding ScheduleDailyCommand}" Margin="0,0,8,0" />
+                    <Button Content="Planung entfernen" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding UnscheduleCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
