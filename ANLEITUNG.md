@@ -22,6 +22,19 @@ Das zeigt alle Befehle. Hilfe zu einem einzelnen Befehl:
 WinCleaner clean-junk --help
 ```
 
+## Am einfachsten: das Menü
+
+Wer sich keine Befehle merken will, tippt einfach:
+
+```
+WinCleaner menu
+```
+
+Dann erscheint ein Menü — Aufgabe per Zahl auswählen, fertig. Löschende
+Aktionen zeigen erst einen Probelauf und fragen dann nach. Noch bequemer:
+im Installationsordner (`%LOCALAPPDATA%\Programs\WinCleaner`) liegt
+**`WinCleaner-Menue.cmd`** — per Doppelklick öffnet sich das Menü direkt.
+
 ## Das Wichtigste zuerst: Nichts passiert ohne dein Okay
 
 WinCleaner ist absichtlich vorsichtig gebaut:

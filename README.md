@@ -44,7 +44,7 @@ entries, services, privacy tweaks), WMI (restore points, drive type), and
 dotnet test WinCleaner.sln
 ```
 
-94 xUnit tests cover `DiskAnalyzer` (size parsing, by-extension grouping, depth
+101 xUnit tests cover `DiskAnalyzer` (size parsing, by-extension grouping, depth
 aggregation without double-counting, filters), `DuplicateFinder` (grouping,
 keep-strategy selection, protected paths, dry-run), `JunkScanner` /
 `JunkCleaner`, `TaskSchedulerHelper`, `Program` (flag validation, version), and
@@ -111,6 +111,7 @@ registry) or `WinCleaner help <command>` / `<command> --help` for one command.
 
 | Command | Description |
 |---------|-------------|
+| `menu` | Interactive text menu (TUI) over the commands — pick a task by number. Needs an interactive console. |
 | `version` / `--version` | Print the tool version. |
 | `help [command]` | Show help, or usage for a single command. |
 

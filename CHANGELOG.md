@@ -5,6 +5,21 @@ All notable changes to WinCleaner are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-07-05
+
+### Added
+- **`menu`** — interactive text menu (TUI) over the existing commands: pick a
+  task by number instead of memorising commands and flags. Every entry
+  delegates to the exact same command dispatch as the CLI (no second code
+  path); destructive tasks run a dry run first and are then confirmed
+  individually. Refuses to run when input is redirected (non-interactive).
+  A double-clickable **`WinCleaner-Menue.cmd`** launcher ships next to the exe.
+
+### Changed
+- `Program.Dispatch` extracted so the CLI and the `menu` command share one
+  dispatch path (flag validation, `--help`, error handling).
+- Test suite expanded from 94 to 101 tests.
+
 ## [1.2.0] - 2026-07-05
 
 Completes the remaining feasible roadmap items from `docs/research/`

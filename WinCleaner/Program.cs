@@ -41,7 +41,22 @@ public class Program
             return 0;
         }
 
-        var cmd = CommandRegistry.Find(first);
+        return Dispatch(args, logger);
+    }
+
+    /// <summary>
+    /// Führt einen einzelnen Befehl aus: sucht ihn in der <see cref="CommandRegistry"/>,
+    /// behandelt <c>--help</c>, validiert die Flags und ruft <see cref="ICommand.Execute"/>.
+    /// <paramref name="args"/> ist die vollständige Argumentliste inkl. Befehlsname
+    /// (wie von der Kommandozeile). Wird sowohl vom normalen Start als auch vom
+    /// interaktiven <c>menu</c>-Befehl genutzt, damit beide exakt dasselbe
+    /// Dispatch-Verhalten (inkl. Flag-Prüfung und Fehlerbehandlung) teilen.
+    /// </summary>
+    public static int Dispatch(string[] args, Logger logger)
+    {
+        if (args.Length == 0) { HelpCommand.Print(); return 0; }
+
+        var cmd = CommandRegistry.Find(args[0]);
         if (cmd is null)
         {
             logger.Error($"Unbekannter Befehl: {args[0]}");
