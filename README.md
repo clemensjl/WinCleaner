@@ -44,7 +44,7 @@ entries, services, privacy tweaks), WMI (restore points, drive type), and
 dotnet test WinCleaner.sln
 ```
 
-65 xUnit tests cover `DiskAnalyzer` (size parsing, by-extension grouping, depth
+94 xUnit tests cover `DiskAnalyzer` (size parsing, by-extension grouping, depth
 aggregation without double-counting, filters), `DuplicateFinder` (grouping,
 keep-strategy selection, protected paths, dry-run), `JunkScanner` /
 `JunkCleaner`, `TaskSchedulerHelper`, `Program` (flag validation, version), and
@@ -69,8 +69,9 @@ registry) or `WinCleaner help <command>` / `<command> --help` for one command.
 
 | Command | Description |
 |---------|-------------|
-| `analyze-disk <path> [--by-type] [--min-size <e.g.100MB>] [--type <.ext,.ext>] [--age-days <n>] [--depth <n>] [--top <n>] [--export csv\|html] [--out <path>]` | Largest folders/files, or grouped by extension; size/type/age filters; CSV/HTML export. |
-| `find-duplicates <path> [--delete] [--keep oldest\|newest\|shortest-path\|longest-path] [--protect <path[,path]>] [--hard-link] [--no-dry-run] [--yes]` | Content-identical files; choose which copy to keep, protect reference folders, or replace duplicates with NTFS hard links. Dry run by default → recycle bin. |
+| `analyze-disk <path> [--by-type] [--min-size <e.g.100MB>] [--type <.ext,.ext>] [--age-days <n>] [--depth <n>] [--top <n>] [--export csv\|html] [--out <path>] [--snapshot <file>]` | Largest folders/files, or grouped by extension; size/type/age filters; CSV/HTML export; save a snapshot for `disk-diff`. |
+| `disk-diff <old.json> <new.json> [--top <n>]` | Compare two `--snapshot` files: which folders/files grew, shrank, appeared or vanished. |
+| `find-duplicates <path> [--delete] [--keep oldest\|newest\|shortest-path\|longest-path] [--protect <path[,path]>] [--hard-link] [--cache] [--no-dry-run] [--yes]` | Content-identical files; choose which copy to keep, protect reference folders, or replace duplicates with NTFS hard links. `--cache` reuses hashes across runs. Dry run by default → recycle bin. |
 | `scan-extras <path> [--delete] [--no-dry-run] [--yes]` | Find empty folders, 0-byte files and broken shortcuts/symlinks; optional delete to recycle bin. |
 
 ### Secure delete (irreversible)
@@ -85,7 +86,7 @@ registry) or `WinCleaner help <command>` / `<command> --help` for one command.
 | Command | Description |
 |---------|-------------|
 | `list-programs [search]` | List installed programs (registry Uninstall keys). |
-| `uninstall <name> [--silent] [--no-dry-run] [--yes]` | Uninstall via the program's UninstallString (silent flag detection for MSI/NSIS/Inno). Restore point first; leftover removal needs its own explicit confirmation. |
+| `uninstall <name> [--silent] [--no-dry-run] [--yes]` | Uninstall via the program's UninstallString (silent flag detection for MSI/NSIS/Inno). Restore point first; leftover removal needs its own explicit confirmation. Also reports services and scheduled tasks still pointing into the install folder. |
 | `debloat [--list] [--no-dry-run] [--yes]` | Remove a curated, conservative set of preinstalled Store apps (reinstallable from the Store). Dry run by default; restore point first. |
 | `list-updates` | Show available package updates (`winget`). |
 | `update [--no-dry-run] [--yes]` | Upgrade all packages via `winget` (dry run by default). |
@@ -101,6 +102,7 @@ registry) or `WinCleaner help <command>` / `<command> --help` for one command.
 | `services [--list] [--set <name> manual\|disabled\|auto] [--undo <name>] [--profile safe-disable] [--no-dry-run] [--yes]` | List services and change start type **reversibly** (registry backup + undo). |
 | `scan-privacy` | Read-only audit of telemetry/AI privacy tweaks (applied or not). |
 | `privacy [--status] \| --apply [standard\|advanced] \| --undo [--no-dry-run] [--yes]` | Apply/undo reversible telemetry, tracking and AI (Copilot/Recall) tweaks. Restore point before machine-wide changes. |
+| `schedule-privacy daily\|weekly [--profile standard\|advanced] \| unschedule` | Re-apply the privacy tweaks on a schedule (Windows updates like to reset them). |
 | `block-telemetry [--status] [--apply [--no-dry-run] [--yes]] [--undo [--yes]]` | Block Microsoft telemetry hosts via a marked, reversible section in the `hosts` file (with backup). Conservative list — no update/store hosts. |
 | `create-restore-point [name]` | Create a system restore point (self-elevates via UAC). |
 | `schedule-clean daily\|weekly` / `unschedule-clean` | Register / remove the scheduled junk cleanup at 03:00. |

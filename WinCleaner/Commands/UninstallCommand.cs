@@ -76,7 +76,9 @@ public sealed class UninstallCommand : ICommand
                     version = program.DisplayVersion,
                     installerKind = kind.ToString(),
                     command = $"{fileName} {arguments}".TrimEnd(),
-                    leftovers = ScanLeftovers(program)
+                    leftovers = ScanLeftovers(program),
+                    serviceLeftovers = LeftoverScanner.FindServiceLeftovers(program.InstallLocation, ctx.Logger),
+                    taskLeftovers = LeftoverScanner.FindTaskLeftovers(program.InstallLocation, ctx.Logger)
                 });
             }
             else
@@ -120,8 +122,11 @@ public sealed class UninstallCommand : ICommand
             ctx.Logger.Info("Deinstallation abgeschlossen.");
         }
 
-        // Reste-Scan: typische Überbleibsel anzeigen.
+        // Reste-Scan: typische Überbleibsel anzeigen – inkl. Dienste und
+        // geplanter Aufgaben, die noch auf den Installationsordner zeigen.
         var leftovers = ScanLeftovers(program);
+        var serviceLeftovers = LeftoverScanner.FindServiceLeftovers(program.InstallLocation, ctx.Logger);
+        var taskLeftovers = LeftoverScanner.FindTaskLeftovers(program.InstallLocation, ctx.Logger);
 
         if (ctx.Json)
         {
@@ -130,13 +135,46 @@ public sealed class UninstallCommand : ICommand
                 dryRun = false,
                 program = program.DisplayName,
                 exitCode,
-                leftovers
+                leftovers,
+                serviceLeftovers,
+                taskLeftovers
             });
             return exitCode == 0 ? 0 : 2;
         }
 
         ReportAndOfferLeftoverCleanup(leftovers, ctx);
+        ReportServiceAndTaskLeftovers(serviceLeftovers, taskLeftovers);
         return exitCode == 0 ? 0 : 2;
+    }
+
+    /// <summary>
+    /// Zeigt Dienste-/Task-Reste NUR an (mit passendem Bordmittel-Befehl zum
+    /// manuellen Entfernen). Bewusst keine automatische Löschung: das Entfernen
+    /// von Diensten/Aufgaben ist nicht umkehrbar und gehört in Nutzerhand.
+    /// </summary>
+    private static void ReportServiceAndTaskLeftovers(
+        List<ServiceLeftover> services, List<TaskLeftover> tasks)
+    {
+        if (services.Count > 0)
+        {
+            Console.WriteLine($"\nDienste, die noch auf den Installationsordner zeigen ({services.Count}):");
+            foreach (var s in services)
+            {
+                Console.WriteLine($"  {s.Name}" + (s.DisplayName is not null ? $" ({s.DisplayName})" : ""));
+                Console.WriteLine($"    Pfad: {s.ImagePath}");
+                Console.WriteLine($"    Entfernen (Admin, nicht umkehrbar): sc delete \"{s.Name}\"");
+            }
+        }
+
+        if (tasks.Count > 0)
+        {
+            Console.WriteLine($"\nGeplante Aufgaben, die noch auf den Installationsordner zeigen ({tasks.Count}):");
+            foreach (var t in tasks)
+            {
+                Console.WriteLine($"  {t.TaskName}");
+                Console.WriteLine($"    Entfernen (nicht umkehrbar): schtasks /Delete /TN \"{t.TaskName}\"");
+            }
+        }
     }
 
     // ---- Auswahl bei mehreren Treffern ----

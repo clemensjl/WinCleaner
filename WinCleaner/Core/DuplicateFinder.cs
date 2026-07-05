@@ -60,7 +60,13 @@ public class DuplicateFinder
     private readonly Logger _logger;
     public DuplicateFinder(Logger logger) => _logger = logger;
 
-    public List<DuplicateGroup> Find(string rootPath)
+    /// <param name="rootPath">Wurzelverzeichnis der Suche.</param>
+    /// <param name="cache">
+    /// Optionaler persistenter Hash-Cache: volle SHA-256-Hashes werden
+    /// wiederverwendet, solange Größe und Schreibzeit der Datei unverändert
+    /// sind. null = jedes Mal frisch hashen (bisheriges Verhalten).
+    /// </param>
+    public List<DuplicateGroup> Find(string rootPath, HashCache? cache = null)
     {
         if (!Directory.Exists(rootPath))
         {
@@ -97,21 +103,38 @@ public class DuplicateFinder
             {
                 if (partialGroup.Count < 2) continue;
 
-                // Stufe 3: voller Hash nur für echte Kandidaten.
-                foreach (var fullGroup in GroupByHash(partialGroup, f => Hash(f, -1)))
+                // Stufe 3: voller Hash nur für echte Kandidaten (ggf. aus dem Cache).
+                foreach (var (hash, fullGroup) in GroupByHashKeyed(partialGroup, f => FullHash(f, cache)))
                 {
                     fullHashes += fullGroup.Count;
                     if (fullGroup.Count < 2) continue;
 
-                    string hash = Hash(fullGroup[0], -1);
                     result.Add(new DuplicateGroup(hash, fullGroup, size * fullGroup.Count));
                 }
             }
         }
 
         result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
-        _logger.Info($"Duplikatsuche fertig: {result.Count} Gruppen, {fullHashes} volle Hashes berechnet.");
+        string cacheNote = cache is not null ? $", davon {cache.Hits} aus dem Hash-Cache" : "";
+        _logger.Info($"Duplikatsuche fertig: {result.Count} Gruppen, {fullHashes} volle Hashes{cacheNote}.");
         return result;
+    }
+
+    /// <summary>
+    /// Voller SHA-256-Hash einer Datei, bei aktivem Cache mit Wiederverwendung:
+    /// Treffer nur, wenn Größe und Schreibzeit unverändert sind.
+    /// </summary>
+    private static string FullHash(string path, HashCache? cache)
+    {
+        if (cache is null) return Hash(path, -1);
+
+        var info = new FileInfo(path);
+        if (cache.TryGet(path, info.Length, info.LastWriteTimeUtc, out var cached))
+            return cached;
+
+        var h = Hash(path, -1);
+        cache.Set(path, info.Length, info.LastWriteTimeUtc, h);
+        return h;
     }
 
     /// <summary>
@@ -441,6 +464,11 @@ public class DuplicateFinder
     // ---- Hash-Helpers ----
 
     private static List<List<string>> GroupByHash(List<string> files, Func<string, string> hasher)
+        => GroupByHashKeyed(files, hasher).Select(g => g.Files).ToList();
+
+    /// <summary>Wie <see cref="GroupByHash"/>, liefert aber den Hash je Gruppe gleich mit.</summary>
+    private static List<(string Hash, List<string> Files)> GroupByHashKeyed(
+        List<string> files, Func<string, string> hasher)
     {
         var map = new Dictionary<string, List<string>>();
         foreach (var f in files)
@@ -450,7 +478,7 @@ public class DuplicateFinder
             catch { continue; } // nicht lesbare Datei kann kein verifiziertes Duplikat sein
             (map.TryGetValue(h, out var list) ? list : map[h] = new()).Add(f);
         }
-        return map.Values.ToList();
+        return map.Select(kv => (kv.Key, kv.Value)).ToList();
     }
 
     /// <summary>SHA-256 über die ersten <paramref name="maxBytes"/> Bytes; -1 = ganze Datei.</summary>

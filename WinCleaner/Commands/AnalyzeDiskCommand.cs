@@ -11,11 +11,13 @@ public sealed class AnalyzeDiskCommand : ICommand
     public string Summary => "Größte Ordner/Dateien anzeigen (Filter, nach Endung, Export)";
     public string Usage =>
         "<Pfad> [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
-        "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>]";
+        "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>] " +
+        "[--snapshot <Datei>]";
 
     public string[] AllowedFlags => new[]
     {
-        "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out"
+        "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
+        "--snapshot"
     };
 
     public int Execute(CommandContext ctx)
@@ -99,6 +101,13 @@ public sealed class AnalyzeDiskCommand : ICommand
             return 1;
         }
 
+        var snapshotPath = ctx.Option("--snapshot");
+        if (snapshotPath is not null && byType)
+        {
+            ctx.Logger.Error("--snapshot ist nur im Top-Level-Modus möglich (nicht mit --by-type).");
+            return 1;
+        }
+
         var analyzer = new DiskAnalyzer(ctx.Logger);
 
         // ---- Modus: nach Endung gruppiert ----
@@ -129,16 +138,21 @@ public sealed class AnalyzeDiskCommand : ICommand
         }
 
         // ---- Modus: Top-Level-Einträge (Standardverhalten) ----
-        var analysis = analyzer.Analyze(path, top, filter.IsActive ? filter : null, depth);
+        // Für einen Snapshot ALLE Einträge messen (nicht nur Top-N), damit der
+        // spätere disk-diff auch kleine, aber gewachsene Pfade sieht; die
+        // Anzeige bleibt bei Top-N.
+        var analysis = analyzer.Analyze(path, snapshotPath is null ? top : int.MaxValue,
+                                        filter.IsActive ? filter : null, depth);
         long total = analysis.TotalBytes;
+        var shown = analysis.Entries.Take(top).ToList();
 
         if (ctx.Json)
         {
-            JsonOut.Write(new { mode = "top-level", analysis.TotalBytes, analysis.Entries });
+            JsonOut.Write(new { mode = "top-level", analysis.TotalBytes, Entries = shown });
         }
         else
         {
-            var rows = analysis.Entries.Select(e => new[]
+            var rows = shown.Select(e => new[]
             {
                 e.IsDir ? "Ordner" : "Datei",
                 e.Path,
@@ -150,8 +164,28 @@ public sealed class AnalyzeDiskCommand : ICommand
             Console.WriteLine($"\nGesamt (Top-Level): {DiskAnalyzer.FormatSize(total)}");
         }
 
+        if (snapshotPath is not null)
+        {
+            try
+            {
+                DiskSnapshot.FromAnalysis(Path.GetFullPath(path), analysis).Save(snapshotPath);
+                ctx.Logger.Info($"Snapshot gespeichert: {Path.GetFullPath(snapshotPath)} " +
+                                $"({analysis.Entries.Count} Einträge). Vergleich: disk-diff <alt> <neu>.");
+            }
+            catch (Exception ex)
+            {
+                ctx.Logger.Error($"Snapshot konnte nicht gespeichert werden: {ex.Message}");
+                return 2;
+            }
+        }
+
         if (exportFormat is not null)
-            return ExportTopLevel(ctx, path, analysis, exportFormat, outPath);
+        {
+            // Export bleibt auch mit --snapshot auf die angezeigten Top-N begrenzt.
+            var exportAnalysis = new DiskAnalysis { TotalBytes = total };
+            exportAnalysis.Entries.AddRange(shown);
+            return ExportTopLevel(ctx, path, exportAnalysis, exportFormat, outPath);
+        }
 
         return 0;
     }

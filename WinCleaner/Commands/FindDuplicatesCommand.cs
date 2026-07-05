@@ -10,11 +10,11 @@ public sealed class FindDuplicatesCommand : ICommand
 
     public string Usage =>
         "<Pfad> [--delete] [--keep oldest|newest|shortest-path|longest-path] " +
-        "[--protect <Pfad[,Pfad...]>] [--hard-link] [--no-dry-run] [--yes]";
+        "[--protect <Pfad[,Pfad...]>] [--hard-link] [--cache] [--no-dry-run] [--yes]";
 
     public string[] AllowedFlags => new[]
     {
-        "--delete", "--yes", "--keep", "--protect", "--hard-link", "--no-dry-run"
+        "--delete", "--yes", "--keep", "--protect", "--hard-link", "--cache", "--no-dry-run"
     };
 
     public int Execute(CommandContext ctx)
@@ -40,8 +40,14 @@ public sealed class FindDuplicatesCommand : ICommand
         // Sicherheits-Default: Probelauf. Echte Aktion nur mit --no-dry-run.
         bool dryRun = !ctx.HasFlag("--no-dry-run");
 
+        // Opt-in: persistenter Hash-Cache beschleunigt Wiederholungsläufe.
+        HashCache? cache = null;
+        if (ctx.HasFlag("--cache"))
+            cache = HashCache.Load(HashCache.DefaultPath, ctx.Logger);
+
         var finder = new DuplicateFinder(ctx.Logger);
-        var groups = finder.Find(path);
+        var groups = finder.Find(path, cache);
+        cache?.Save();
 
         // Nutzdaten (Fundliste) nach stdout.
         if (ctx.Json && !wantsAction)

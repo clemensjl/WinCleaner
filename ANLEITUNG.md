@@ -57,6 +57,15 @@ WinCleaner analyze-disk D:\ --by-type            # nach Dateityp gruppiert
 WinCleaner analyze-disk D:\ --min-size 500MB     # nur große Brocken
 ```
 
+### Speicherwachstum über die Zeit verfolgen
+
+```
+WinCleaner analyze-disk D:\ --snapshot vorher.json    # Zustand festhalten
+# ... Wochen später ...
+WinCleaner analyze-disk D:\ --snapshot nachher.json
+WinCleaner disk-diff vorher.json nachher.json         # Was ist gewachsen?
+```
+
 ### Doppelte Dateien finden und aufräumen
 
 ```
@@ -66,7 +75,8 @@ WinCleaner find-duplicates D:\Fotos --delete --keep oldest --no-dry-run
 ```
 
 Mit `--protect <Ordner>` wird ein Referenzordner nie angerührt; `--hard-link`
-spart Platz ohne etwas zu löschen.
+spart Platz ohne etwas zu löschen. `--cache` merkt sich berechnete Hashes und
+macht Wiederholungsläufe über große Ordner deutlich schneller.
 
 ### Windows schneller starten lassen
 
@@ -94,6 +104,12 @@ WinCleaner privacy --undo              # alles wieder zurück
 `--apply advanced` schaltet zusätzlich Cortana, Standortverlauf u. a. ab.
 `block-telemetry --apply` blockt Microsoft-Telemetrie-Server über die
 hosts-Datei (umkehrbar mit `--undo`).
+
+Windows-Updates setzen einzelne Schalter gern wieder zurück — dagegen hilft:
+
+```
+WinCleaner schedule-privacy weekly     # Tweaks jede Woche automatisch neu anwenden
+```
 
 ### Vorinstallierten Ballast entfernen
 

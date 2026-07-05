@@ -5,6 +5,34 @@ All notable changes to WinCleaner are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-05
+
+Completes the remaining feasible roadmap items from `docs/research/`
+(wave 3): snapshot diffing, service/task leftover detection, scheduled
+privacy re-apply and a persistent duplicate hash cache.
+
+### Added
+- **`disk-diff <alt.json> <neu.json>`** — compare two disk snapshots: which
+  folders/files grew, shrank, appeared or vanished (sorted by |Δ|, `--top`,
+  `--json`).
+- **`analyze-disk --snapshot <file>`** — save the (unfiltered-by-top-N)
+  top-level analysis as a snapshot file for later `disk-diff`.
+- **`uninstall`** now also detects **services and scheduled tasks** that still
+  point into the program's install folder (leftover scan). Report-only with
+  the matching `sc delete` / `schtasks /Delete` commands — removing services
+  and tasks is irreversible and deliberately stays a manual decision.
+- **`schedule-privacy daily|weekly [--profile standard|advanced] | unschedule`**
+  — scheduled re-apply of the privacy tweaks (Windows feature updates like to
+  reset individual telemetry/AI switches); runs
+  `privacy --apply <profile> --no-dry-run --yes` at 05:00.
+- **`find-duplicates --cache`** — opt-in persistent hash cache
+  (`%LOCALAPPDATA%\WinCleaner\hash-cache.json`): full SHA-256 hashes are
+  reused across runs as long as a file's size and mtime are unchanged; never
+  changes results, only speeds up repeat runs.
+
+### Changed
+- Test suite expanded from 65 to 94 tests.
+
 ## [1.1.0] - 2026-06-17
 
 Major feature release. The command set grows from 9 to 26 commands, derived from
