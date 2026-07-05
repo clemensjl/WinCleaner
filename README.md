@@ -10,6 +10,8 @@ software updates, and more — without bundling, telemetry, or a resident servic
 > command registry (each command is a self-contained `ICommand`). See
 > [CHANGELOG.md](CHANGELOG.md).
 
+> 🇩🇪 **Deutsche Schnellstart-Anleitung:** [ANLEITUNG.md](ANLEITUNG.md)
+
 ## Design principles
 
 - **Scriptable first** — `--json` output, exit codes, stderr-only diagnostics,
