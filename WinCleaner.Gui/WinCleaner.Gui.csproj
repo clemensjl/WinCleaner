@@ -19,6 +19,12 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <ApplicationIcon>Assets\wincleaner.ico</ApplicationIcon>
         <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
+
+        <!-- WPF + Single-File: die nativen WPF-DLLs (PresentationNative, wpfgfx …)
+             MÜSSEN beim Selbstentpacken auf die Platte, sonst wirft der Start eine
+             DllNotFoundException. Ohne diese Flags startet die Single-File-EXE nicht. -->
+        <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+        <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     </PropertyGroup>
 
     <ItemGroup>
