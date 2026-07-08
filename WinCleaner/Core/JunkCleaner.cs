@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using VB = Microsoft.VisualBasic.FileIO; // für Recycle Bin-Operationen
+using WinCleaner.Util; // stiller Papierkorb-Löschvorgang (RecycleBinHelper)
 
 namespace WinCleaner.Core;
 
@@ -38,40 +38,16 @@ public class JunkCleaner
                 // 1) Unterordner in EINEM Schritt je Ordner entsorgen (viel schneller als Datei-für-Datei)
                 foreach (var subdir in Directory.EnumerateDirectories(item.Path, "*", TopOnly))
                 {
-                    try
-                    {
-                        if (sendToRecycleBin)
-                        {
-                            VB.FileSystem.DeleteDirectory(
-                                subdir,
-                                VB.UIOption.OnlyErrorDialogs,
-                                VB.RecycleOption.SendToRecycleBin);
-                        }
-                        else
-                        {
-                            Directory.Delete(subdir, true);
-                        }
-                    }
+                    // Gesperrte/geschützte Ordner werden still übersprungen –
+                    // KEIN Berechtigungsdialog (RecycleBinHelper unterdrückt jede UI).
+                    try { RecycleBinHelper.DeleteDirectory(subdir, sendToRecycleBin); }
                     catch { /* gesperrte Ordner überspringen */ }
                 }
 
                 // 2) Dateien im Wurzelordner entsorgen
                 foreach (var file in Directory.EnumerateFiles(item.Path, "*", TopOnly))
                 {
-                    try
-                    {
-                        if (sendToRecycleBin)
-                        {
-                            VB.FileSystem.DeleteFile(
-                                file,
-                                VB.UIOption.OnlyErrorDialogs,
-                                VB.RecycleOption.SendToRecycleBin);
-                        }
-                        else
-                        {
-                            File.Delete(file);
-                        }
-                    }
+                    try { RecycleBinHelper.DeleteFile(file, sendToRecycleBin); }
                     catch { /* ignore locked */ }
                 }
             }

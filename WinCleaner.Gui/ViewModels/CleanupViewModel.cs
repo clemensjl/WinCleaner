@@ -56,12 +56,11 @@ public sealed class CleanupViewModel : PageViewModelBase
             return;
         }
 
+        // Junk ist der sichere Standardfall: keine Rückfrage, kein
+        // Berechtigungsdialog. Die Vorschau-Liste + der bewusste Klick auf
+        // „Bereinigen" sind die Bestätigung; gelöscht wird umkehrbar in den
+        // Papierkorb (gesperrte/geschützte Dateien werden still übersprungen).
         long bytes = selected.Sum(s => s.Bytes);
-        if (!Dialogs.Confirm(
-                $"{selected.Count} Kategorien ({DiskAnalyzer.FormatSize(bytes)}) in den Papierkorb verschieben?\n\n" +
-                "Rückgängig über den Papierkorb möglich."))
-            return;
-
         Shell.Status("Bereinige…");
         var logger = Shell.NewLogger();
         var report = new JunkReport();

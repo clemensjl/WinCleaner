@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using VB = Microsoft.VisualBasic.FileIO; // Recycle-Bin-Löschung wie im JunkCleaner
+using WinCleaner.Util; // stiller Papierkorb-Löschvorgang (RecycleBinHelper)
 
 namespace WinCleaner.Core;
 
@@ -157,10 +157,7 @@ public class DuplicateFinder
             {
                 try
                 {
-                    if (sendToRecycleBin)
-                        VB.FileSystem.DeleteFile(f, VB.UIOption.OnlyErrorDialogs, VB.RecycleOption.SendToRecycleBin);
-                    else
-                        File.Delete(f);
+                    RecycleBinHelper.DeleteFile(f, sendToRecycleBin);
                     deleted++;
                 }
                 catch (Exception ex) { _logger.Debug($"Löschen fehlgeschlagen {f}: {ex.Message}"); }
@@ -363,10 +360,7 @@ public class DuplicateFinder
     {
         try
         {
-            if (sendToRecycleBin)
-                VB.FileSystem.DeleteFile(path, VB.UIOption.OnlyErrorDialogs, VB.RecycleOption.SendToRecycleBin);
-            else
-                File.Delete(path);
+            RecycleBinHelper.DeleteFile(path, sendToRecycleBin);
             return true;
         }
         catch (Exception ex)
