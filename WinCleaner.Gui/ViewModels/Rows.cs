@@ -61,6 +61,18 @@ public sealed class DupRow
     public string Files { get; }
 }
 
+/// <summary>Eine Gruppe visuell ähnlicher Bilder (Anzeige).</summary>
+public sealed class ImageGroupRow
+{
+    public ImageGroupRow(SimilarImageGroup g)
+    {
+        Header = $"{g.Files.Count} Bilder · {DiskAnalyzer.FormatSize(g.TotalBytes)} · max. Abstand {g.MaxDistance}";
+        Files = string.Join("\n", g.Files);
+    }
+    public string Header { get; }
+    public string Files { get; }
+}
+
 /// <summary>Ein installiertes Programm.</summary>
 public sealed class ProgramRow
 {

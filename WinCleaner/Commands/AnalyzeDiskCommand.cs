@@ -10,14 +10,14 @@ public sealed class AnalyzeDiskCommand : ICommand
     public string Name => "analyze-disk";
     public string Summary => "Größte Ordner/Dateien anzeigen (Filter, nach Endung, Export)";
     public string Usage =>
-        "<Pfad> [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
+        "<Pfad> [--fast] [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
         "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>] " +
-        "[--snapshot <Datei>]";
+        "[--snapshot <Datei>] [--html <report.html>]";
 
     public string[] AllowedFlags => new[]
     {
-        "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
-        "--snapshot"
+        "--fast", "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
+        "--snapshot", "--html"
     };
 
     public int Execute(CommandContext ctx)
@@ -108,12 +108,37 @@ public sealed class AnalyzeDiskCommand : ICommand
             return 1;
         }
 
+        // Interaktiver HTML-Treemap-Report (zusätzlich zur normalen Ausgabe).
+        // Präsenz über beide Schreibweisen erkennen (--html pfad UND --html=pfad).
+        string? htmlPath = null;
+        bool htmlRequested = ctx.Args.Any(a =>
+            string.Equals(a, "--html", StringComparison.OrdinalIgnoreCase) ||
+            a.StartsWith("--html=", StringComparison.OrdinalIgnoreCase));
+        if (htmlRequested)
+        {
+            htmlPath = ctx.Option("--html");
+            if (string.IsNullOrWhiteSpace(htmlPath) ||
+                htmlPath.StartsWith("--", StringComparison.Ordinal))
+            {
+                ctx.Logger.Error("--html braucht einen Zielpfad, z.B. --html report.html.");
+                return 1;
+            }
+        }
+
         var analyzer = new DiskAnalyzer(ctx.Logger);
+        var activeFilter = filter.IsActive ? filter : null;
+
+        // --fast: NTFS-Schnellscan (MFT/USN); fällt bei fehlenden Adminrechten,
+        // Nicht-NTFS oder Fehlern automatisch auf den Standard-Scan zurück
+        // (Meldung auf stderr). Ausgabeformat ist in beiden Fällen identisch.
+        bool fast = ctx.HasFlag("--fast");
+        var fastScanner = fast ? new NtfsFastScanner(ctx.Logger) : null;
 
         // ---- Modus: nach Endung gruppiert ----
         if (byType)
         {
-            var ext = analyzer.AnalyzeByExtension(path, top, filter.IsActive ? filter : null);
+            var ext = fastScanner?.TryAnalyzeByExtension(path, top, activeFilter)
+                      ?? analyzer.AnalyzeByExtension(path, top, activeFilter);
             long extTotal = ext.TotalBytes;
 
             if (ctx.Json)
@@ -131,6 +156,12 @@ public sealed class AnalyzeDiskCommand : ICommand
                 Console.WriteLine($"\nGesamt (gefiltert): {DiskAnalyzer.FormatSize(extTotal)}");
             }
 
+            if (htmlPath is not null)
+            {
+                var rcHtml = WriteHtmlReport(ctx, analyzer, path, filter, htmlPath);
+                if (rcHtml != 0) return rcHtml;
+            }
+
             if (exportFormat is not null)
                 return ExportByType(ctx, path, ext, exportFormat, outPath);
 
@@ -141,8 +172,12 @@ public sealed class AnalyzeDiskCommand : ICommand
         // Für einen Snapshot ALLE Einträge messen (nicht nur Top-N), damit der
         // spätere disk-diff auch kleine, aber gewachsene Pfade sieht; die
         // Anzeige bleibt bei Top-N.
-        var analysis = analyzer.Analyze(path, snapshotPath is null ? top : int.MaxValue,
-                                        filter.IsActive ? filter : null, depth);
+        var topN = snapshotPath is null ? top : int.MaxValue;
+        // Effektiven Modus festhalten: --fast kann still auf den Standard-Scan
+        // zurückfallen — der Snapshot muss den tatsächlich gelaufenen Modus tragen.
+        var fastResult = fastScanner?.TryAnalyze(path, topN, activeFilter, depth);
+        var analysis = fastResult ?? analyzer.Analyze(path, topN, activeFilter, depth);
+        bool usedFast = fastResult is not null;
         long total = analysis.TotalBytes;
         var shown = analysis.Entries.Take(top).ToList();
 
@@ -168,7 +203,8 @@ public sealed class AnalyzeDiskCommand : ICommand
         {
             try
             {
-                DiskSnapshot.FromAnalysis(Path.GetFullPath(path), analysis).Save(snapshotPath);
+                DiskSnapshot.FromAnalysis(Path.GetFullPath(path), analysis,
+                    scanMode: usedFast ? "ntfs-fast" : "standard").Save(snapshotPath);
                 ctx.Logger.Info($"Snapshot gespeichert: {Path.GetFullPath(snapshotPath)} " +
                                 $"({analysis.Entries.Count} Einträge). Vergleich: disk-diff <alt> <neu>.");
             }
@@ -179,6 +215,12 @@ public sealed class AnalyzeDiskCommand : ICommand
             }
         }
 
+        if (htmlPath is not null)
+        {
+            var rcHtml = WriteHtmlReport(ctx, analyzer, path, filter, htmlPath);
+            if (rcHtml != 0) return rcHtml;
+        }
+
         if (exportFormat is not null)
         {
             // Export bleibt auch mit --snapshot auf die angezeigten Top-N begrenzt.
@@ -187,6 +229,42 @@ public sealed class AnalyzeDiskCommand : ICommand
             return ExportTopLevel(ctx, path, exportAnalysis, exportFormat, outPath);
         }
 
+        return 0;
+    }
+
+    // ---- Interaktiver HTML-Treemap-Report (--html) ----
+
+    /// <summary>
+    /// Schreibt den selbst-enthaltenen HTML-Report (Treemap + Tabellen). Nutzt
+    /// denselben Filter wie die normale Ausgabe; Baum UND Endungs-Aufschlüsselung
+    /// entstehen in einem einzigen Scan (<see cref="DiskAnalyzer.AnalyzeTree"/>).
+    /// </summary>
+    private static int WriteHtmlReport(CommandContext ctx, DiskAnalyzer analyzer, string root,
+                                       DiskFilter filter, string htmlPath)
+    {
+        var activeFilter = filter.IsActive ? filter : null;
+        var extensions = new ExtensionAnalysis();
+        var tree = analyzer.AnalyzeTree(root, maxDepth: 4, activeFilter,
+                                        extensionsOut: extensions, extensionsTopN: 20);
+
+        var html = HtmlReportWriter.Build(new HtmlReportData
+        {
+            RootPath = Path.GetFullPath(root),
+            GeneratedAt = DateTime.Now,
+            Tree = tree,
+            Extensions = extensions
+        });
+
+        try
+        {
+            File.WriteAllText(htmlPath, html, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            ctx.Logger.Info($"HTML-Report geschrieben: {Path.GetFullPath(htmlPath)}");
+        }
+        catch (Exception ex)
+        {
+            ctx.Logger.Error($"HTML-Report konnte nicht geschrieben werden: {ex.Message}");
+            return 2;
+        }
         return 0;
     }
 
@@ -309,13 +387,9 @@ public sealed class AnalyzeDiskCommand : ICommand
         return sb.ToString();
     }
 
-    /// <summary>Maskiert HTML-Sonderzeichen, damit Pfade/Endungen sicher im Report stehen.</summary>
-    private static string HtmlEscape(string value) => value
-        .Replace("&", "&amp;")
-        .Replace("<", "&lt;")
-        .Replace(">", "&gt;")
-        .Replace("\"", "&quot;")
-        .Replace("'", "&#39;");
+    /// <summary>Maskiert HTML-Sonderzeichen, damit Pfade/Endungen sicher im Report stehen
+    /// (geteilter Helfer mit dem Treemap-Report).</summary>
+    private static string HtmlEscape(string value) => HtmlReportWriter.Esc(value);
 
     /// <summary>Zerlegt eine kommagetrennte Endungsliste in normalisierte Endungen (klein, mit Punkt).</summary>
     private static IReadOnlyCollection<string> ParseExtensions(string raw)

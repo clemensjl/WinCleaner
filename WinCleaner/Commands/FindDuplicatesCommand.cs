@@ -31,11 +31,19 @@ public sealed class FindDuplicatesCommand : ICommand
         try { keep = DuplicateFinder.ParseKeepStrategy(ctx.Option("--keep")); }
         catch (ArgumentException ex) { ctx.Logger.Error(ex.Message); return 1; }
 
-        var protectedPaths = ParseProtected(ctx);
+        var protectedPaths = KeepProtectOptions.ParseProtected(ctx);
         bool hardLink = ctx.HasFlag("--hard-link");
+        bool delete = ctx.HasFlag("--delete");
+
+        // --delete und --hard-link schließen sich gegenseitig aus.
+        if (delete && hardLink)
+        {
+            ctx.Logger.Error("--delete und --hard-link schließen sich gegenseitig aus – bitte genau eine Aktion wählen.");
+            return 1;
+        }
 
         // Eine Aktion (Löschen/Hardlink) findet nur bei --delete oder --hard-link statt.
-        bool wantsAction = ctx.HasFlag("--delete") || hardLink;
+        bool wantsAction = delete || hardLink;
 
         // Sicherheits-Default: Probelauf. Echte Aktion nur mit --no-dry-run.
         bool dryRun = !ctx.HasFlag("--no-dry-run");
@@ -71,7 +79,8 @@ public sealed class FindDuplicatesCommand : ICommand
 
         if (groups.Count == 0)
         {
-            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, dryRun, hardLink, true));
+            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, 0, dryRun, hardLink, true,
+                Array.Empty<DuplicateFileAction>()));
             else Console.WriteLine("\nKeine Duplikate zur Bearbeitung.");
             return 0;
         }
@@ -118,6 +127,8 @@ public sealed class FindDuplicatesCommand : ICommand
                               $"({DiskAnalyzer.FormatSize(r.BytesAffected)}, je Gruppe eine Datei behalten).");
             if (r.GroupsSkipped > 0)
                 Console.WriteLine($"{r.GroupsSkipped} Gruppe(n) übersprungen (geschützt oder nicht verarbeitbar).");
+            if (r.FilesSkipped > 0)
+                Console.WriteLine($"{r.FilesSkipped} Datei(en) übersprungen (Details auf stderr, z. B. schon verlinkt oder anderes Volume).");
         }
         return 0;
     }
@@ -143,37 +154,5 @@ public sealed class FindDuplicatesCommand : ICommand
         return Prompt.Confirm("Fortfahren?");
     }
 
-    /// <summary>
-    /// Sammelt alle --protect-Werte. Unterstützt mehrfaches Vorkommen
-    /// (<c>--protect a --protect b</c>) UND Kommatrennung je Vorkommen
-    /// (<c>--protect a,b</c>), in beiden Schreibweisen <c>--protect=...</c>.
-    /// </summary>
-    private static List<string> ParseProtected(CommandContext ctx)
-    {
-        var list = new List<string>();
-        var args = ctx.Args;
-        for (int i = 0; i < args.Length; i++)
-        {
-            string? value = null;
-            if (args[i].StartsWith("--protect=", StringComparison.OrdinalIgnoreCase))
-                value = args[i]["--protect=".Length..];
-            else if (string.Equals(args[i], "--protect", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-                value = args[++i];
-
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                list.Add(part);
-        }
-        return list;
-    }
-
-    private static string KeepLabel(KeepStrategy keep) => keep switch
-    {
-        KeepStrategy.First        => "erste Datei",
-        KeepStrategy.Oldest       => "älteste",
-        KeepStrategy.Newest       => "neueste",
-        KeepStrategy.ShortestPath => "kürzester Pfad",
-        KeepStrategy.LongestPath  => "längster Pfad",
-        _                         => "erste Datei"
-    };
+    private static string KeepLabel(KeepStrategy keep) => KeepProtectOptions.KeepLabel(keep);
 }

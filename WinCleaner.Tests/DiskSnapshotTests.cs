@@ -87,4 +87,46 @@ public class DiskSnapshotTests
         // Fremde JSON-Dateien dürfen nicht als leerer Snapshot durchgehen.
         Assert.Throws<InvalidDataException>(() => DiskSnapshot.Load(file));
     }
+
+    // ---- Scan-Modus (--fast kann still auf Standard zurückfallen) ----
+
+    [Fact]
+    public void ScanMode_RoundTripsThroughSaveAndLoad()
+    {
+        using var tmp = new TempDir();
+        var file = System.IO.Path.Combine(tmp.Path, "snap.json");
+
+        var snap = new DiskSnapshot
+        {
+            Root       = @"C:\Daten",
+            CreatedUtc = DateTime.UtcNow,
+            TotalBytes = 1,
+            ScanMode   = "ntfs-fast"
+        };
+        snap.Save(file);
+
+        Assert.Equal("ntfs-fast", DiskSnapshot.Load(file).ScanMode);
+    }
+
+    [Fact]
+    public void Load_OldSnapshotWithoutScanMode_DefaultsToStandard()
+    {
+        using var tmp = new TempDir();
+        // Snapshot-JSON aus v2.1.0-Vorständen: ohne ScanMode-Feld.
+        var file = tmp.Write("alt.json",
+            "{ \"Format\": \"wincleaner-disk-snapshot/1\", \"Root\": \"C:\\\\Daten\", " +
+            "\"CreatedUtc\": \"2026-01-01T00:00:00Z\", \"TotalBytes\": 0, \"Entries\": [] }");
+
+        Assert.Equal("standard", DiskSnapshot.Load(file).ScanMode);
+    }
+
+    [Fact]
+    public void FromAnalysis_CarriesScanMode_DefaultIsStandard()
+    {
+        var analysis = new DiskAnalysis { TotalBytes = 5 };
+
+        Assert.Equal("standard", DiskSnapshot.FromAnalysis(@"C:\x", analysis).ScanMode);
+        Assert.Equal("ntfs-fast",
+            DiskSnapshot.FromAnalysis(@"C:\x", analysis, scanMode: "ntfs-fast").ScanMode);
+    }
 }

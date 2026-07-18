@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using Microsoft.Win32.SafeHandles;
 using WinCleaner.Util; // stiller Papierkorb-Löschvorgang (RecycleBinHelper)
 
 namespace WinCleaner.Core;
@@ -26,6 +27,14 @@ public enum KeepStrategy
 }
 
 /// <summary>
+/// Eine einzelne (geplante oder ausgeführte) Aktion an einer Datei – Bestandteil
+/// der <c>--json</c>-Ausgabe: Gruppen-Hash, behaltene Datei, betroffene Datei,
+/// Aktions-Code (siehe <c>Act*</c>-Konstanten in <see cref="DuplicateFinder"/>)
+/// und die dadurch eingesparten Bytes (0 bei Skip/Fehler).
+/// </summary>
+public sealed record DuplicateFileAction(string Hash, string Keep, string File, string Action, long Bytes);
+
+/// <summary>
 /// Ergebnis einer Lösch-/Hardlink-Aktion über mehrere Gruppen, für JSON-Ausgabe
 /// und Zusammenfassung. Rein informativ – im Dry-Run beschreibt es die geplante
 /// Aktion.
@@ -34,10 +43,12 @@ public sealed record DuplicateActionResult(
     int GroupsProcessed,
     int GroupsSkipped,
     int FilesAffected,
+    int FilesSkipped,
     long BytesAffected,
     bool DryRun,
     bool HardLink,
-    bool SentToRecycleBin);
+    bool SentToRecycleBin,
+    IReadOnlyList<DuplicateFileAction> Actions);
 
 /// <summary>
 /// Findet inhaltsgleiche Dateien. Statt jede Datei voll zu hashen, filtert ein
@@ -48,6 +59,22 @@ public sealed record DuplicateActionResult(
 public class DuplicateFinder
 {
     private const int PartialBytes = 4096;
+
+    /// <summary>NTFS erlaubt maximal 1024 Hardlinks pro Datei.</summary>
+    public const int MaxHardLinksPerFile = 1024;
+
+    // Aktions-Codes für DuplicateFileAction.Action (stabil, für --json).
+    public const string ActHardLink          = "hardlink";
+    public const string ActDelete            = "delete";
+    public const string ActPlanHardLink      = "plan-hardlink";
+    public const string ActPlanDelete        = "plan-delete";
+    public const string ActFailed            = "failed";
+    public const string ActSkipOtherVolume   = "skip-other-volume";
+    public const string ActSkipNotNtfs       = "skip-not-ntfs";
+    public const string ActSkipReparsePoint  = "skip-reparse-point";
+    public const string ActSkipAlreadyLinked = "skip-already-linked";
+    public const string ActSkipLinkLimit     = "skip-link-limit";
+    public const string ActSkipIdentityUnknown = "skip-identity-unknown";
 
     private static readonly EnumerationOptions DeepOpts = new()
     {
@@ -78,9 +105,10 @@ public class DuplicateFinder
         var bySize = new Dictionary<long, List<string>>();
         foreach (var file in Directory.EnumerateFiles(rootPath, "*", DeepOpts))
         {
-            // Eigene Hardlink-Sicherungen NICHT erfassen, sonst tauchen sie in
-            // Folgeläufen als neue Duplikate auf.
-            if (file.EndsWith(".wcbak", StringComparison.OrdinalIgnoreCase)) continue;
+            // Eigene Hardlink-Sicherungen/Temp-Links NICHT erfassen, sonst
+            // tauchen sie in Folgeläufen als neue Duplikate auf.
+            if (file.EndsWith(".wcbak", StringComparison.OrdinalIgnoreCase) ||
+                file.EndsWith(".wclnk", StringComparison.OrdinalIgnoreCase)) continue;
 
             try
             {
@@ -198,8 +226,9 @@ public class DuplicateFinder
     {
         var normProtected = NormalizeProtected(protectedPaths);
 
-        int groupsProcessed = 0, groupsSkipped = 0, filesAffected = 0;
+        int groupsProcessed = 0, groupsSkipped = 0, filesAffected = 0, filesSkipped = 0;
         long bytesAffected = 0;
+        var actions = new List<DuplicateFileAction>();
 
         foreach (var g in groups)
         {
@@ -214,6 +243,9 @@ public class DuplicateFinder
             }
 
             string keepFile = SelectKeepFile(g.Files, keep, normProtected);
+            // Fallback für unlesbare Dateien: Gruppen-Durchschnitt. Für exakte
+            // Duplikate ist er sogar korrekt; Similar-Image-Gruppen haben aber
+            // ungleiche Größen, daher unten pro Datei die echte Größe lesen.
             long perFileBytes = g.Files.Count > 0 ? g.TotalBytes / g.Files.Count : 0;
 
             // Kandidaten = alle außer der behaltenen und außer geschützten Dateien.
@@ -224,22 +256,39 @@ public class DuplicateFinder
             if (candidates.Count == 0) { groupsSkipped++; continue; }
 
             bool anyAffected = false;
+            // Im Probelauf geplante Hardlinks je Gruppe mitzählen: der On-Disk-
+            // Linkcount wächst dort nicht, das Limit muss trotzdem greifen.
+            int plannedLinks = 0;
             foreach (var f in candidates)
             {
-                if (hardLink && !SameVolume(keepFile, f))
+                // Guards gelten auch im Probelauf, damit die gemeldete Ersparnis
+                // der echten Ausführung entspricht (z. B. keine Schein-Ersparnis
+                // für bereits verlinkte Paare).
+                if (hardLink && HardLinkBlocker(keepFile, f, dryRun ? plannedLinks : 0) is { } blocked)
                 {
-                    _logger.Info($"Hardlink nicht möglich (anderes Volume), übersprungen: {f}");
+                    _logger.Info($"Hardlink übersprungen ({BlockerText(blocked)}): {f}");
+                    actions.Add(new DuplicateFileAction(g.Hash, keepFile, f, blocked, 0));
+                    filesSkipped++;
                     continue;
                 }
+
+                // Echte Größe der Datei (Similar-Image-Gruppen haben ungleiche
+                // Größen); nur bei unlesbarer Datei den Durchschnitt melden.
+                long fileBytes;
+                try { fileBytes = new FileInfo(f).Length; }
+                catch { fileBytes = perFileBytes; }
 
                 if (dryRun)
                 {
                     _logger.Info(hardLink
                         ? $"[Probelauf] Würde durch Hardlink auf '{keepFile}' ersetzen: {f}"
                         : $"[Probelauf] Würde {(sendToRecycleBin ? "in den Papierkorb verschieben" : "permanent löschen")}: {f}");
+                    actions.Add(new DuplicateFileAction(g.Hash, keepFile, f,
+                        hardLink ? ActPlanHardLink : ActPlanDelete, fileBytes));
                     filesAffected++;
-                    bytesAffected += perFileBytes;
+                    bytesAffected += fileBytes;
                     anyAffected = true;
+                    if (hardLink) plannedLinks++;
                     continue;
                 }
 
@@ -249,9 +298,16 @@ public class DuplicateFinder
 
                 if (ok)
                 {
+                    actions.Add(new DuplicateFileAction(g.Hash, keepFile, f,
+                        hardLink ? ActHardLink : ActDelete, fileBytes));
                     filesAffected++;
-                    bytesAffected += perFileBytes;
+                    bytesAffected += fileBytes;
                     anyAffected = true;
+                }
+                else
+                {
+                    actions.Add(new DuplicateFileAction(g.Hash, keepFile, f, ActFailed, 0));
+                    filesSkipped++;
                 }
             }
 
@@ -262,16 +318,18 @@ public class DuplicateFinder
             : sendToRecycleBin ? "in den Papierkorb verschoben" : "gelöscht");
         _logger.Info($"Duplikat-Aktion fertig: {filesAffected} Dateien {verb}, " +
                      $"{DiskAnalyzer.FormatSize(bytesAffected)}, {groupsProcessed} Gruppen bearbeitet, " +
-                     $"{groupsSkipped} übersprungen.");
+                     $"{groupsSkipped} Gruppen und {filesSkipped} Dateien übersprungen.");
 
         return new DuplicateActionResult(
             GroupsProcessed: groupsProcessed,
             GroupsSkipped: groupsSkipped,
             FilesAffected: filesAffected,
+            FilesSkipped: filesSkipped,
             BytesAffected: bytesAffected,
             DryRun: dryRun,
             HardLink: hardLink,
-            SentToRecycleBin: sendToRecycleBin);
+            SentToRecycleBin: sendToRecycleBin,
+            Actions: actions);
     }
 
     /// <summary>Parst einen Strategie-Namen (z. B. "oldest") in <see cref="KeepStrategy"/>.</summary>
@@ -371,61 +429,206 @@ public class DuplicateFinder
     }
 
     /// <summary>
-    /// Ersetzt <paramref name="duplicate"/> durch einen Hardlink auf
-    /// <paramref name="keepFile"/>. Erst wird das Duplikat (umkehrbar) entfernt,
-    /// dann der Hardlink angelegt; schlägt der Link fehl, wird versucht,
-    /// die Original-Datei aus dem Quell-Inhalt wiederherzustellen.
+    /// Ersetzt <paramref name="duplicate"/> atomar durch einen Hardlink auf
+    /// <paramref name="keepFile"/>: Link unter temporärem Namen im selben
+    /// Verzeichnis anlegen, per <see cref="File.Replace(string,string,string,bool)"/>
+    /// eintauschen (ReplaceFile-Swap), Original als Rückversicherung in den
+    /// Papierkorb. Schlägt ein Schritt fehl, bleibt das Original unverändert
+    /// (Rollback: nur der Temp-Link wird entfernt).
     /// </summary>
     private bool ReplaceWithHardLink(string duplicate, string keepFile, bool sendToRecycleBin)
     {
-        // Vor dem Entfernen eine permanente Sicherung anlegen, falls das
-        // Hardlink-Anlegen scheitert (Papierkorb lässt sich nicht zuverlässig
-        // automatisch zurückholen).
-        string backup = duplicate + ".wcbak";
-        try
+        string tempLink = duplicate + "." + Guid.NewGuid().ToString("N")[..8] + ".wclnk";
+        string backup   = duplicate + ".wcbak";
+
+        // 1) Hardlink unter Temp-Namen anlegen – berührt das Original nicht.
+        if (!CreateHardLink(tempLink, keepFile, IntPtr.Zero))
         {
-            File.Copy(duplicate, backup, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error($"Hardlink: Sicherung fehlgeschlagen, übersprungen {duplicate}: {ex.Message}");
+            var err = new Win32Exception(Marshal.GetLastWin32Error());
+            _logger.Error($"Hardlink fehlgeschlagen für {duplicate}: {err.Message} – Datei bleibt unverändert.");
             return false;
         }
 
+        // File.Replace (ReplaceFile) überträgt Attribute und CreationTime der
+        // ersetzten Datei auf die Ersatzdatei — und die ist hier ein Hardlink
+        // auf den File-Record der Keep-Datei. Ohne Rücksicherung würden z. B.
+        // Hidden/System und die CreationTime des Duplikats auf die Keep-Datei
+        // durchschlagen. Also vorher sichern, nach dem Tausch wiederherstellen.
+        // ACLs werden bewusst NICHT gesichert/wiederhergestellt (ReplaceFile
+        // erhält die des Ziel-Namensraums; ein Restore wäre hier überkorrekt).
+        FileAttributes keepAttrs;
+        DateTime keepCreation, keepWrite;
         try
         {
-            File.Delete(duplicate); // Platz für den neuen Linknamen schaffen
+            keepAttrs    = File.GetAttributes(keepFile);
+            keepCreation = File.GetCreationTimeUtc(keepFile);
+            keepWrite    = File.GetLastWriteTimeUtc(keepFile);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Metadaten von {keepFile} nicht lesbar ({ex.Message}) – Datei bleibt unverändert.");
+            TryDelete(tempLink);
+            return false;
+        }
 
-            if (!CreateHardLink(duplicate, keepFile, IntPtr.Zero))
+        // 2) Atomarer Tausch: Temp-Link -> Duplikat, Original -> Backup.
+        try
+        {
+            File.Replace(tempLink, duplicate, backup, ignoreMetadataErrors: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Hardlink-Tausch fehlgeschlagen für {duplicate}: {ex.Message} – Original bleibt unverändert.");
+            TryDelete(tempLink); // Rollback: nur den Temp-Link entfernen
+            return false;
+        }
+
+        // Keep-Metadaten wiederherstellen (Zeiten vor Attributen: ein evtl.
+        // ReadOnly-Attribut würde die Zeit-Setter blockieren).
+        try
+        {
+            File.SetCreationTimeUtc(keepFile, keepCreation);
+            File.SetLastWriteTimeUtc(keepFile, keepWrite);
+            File.SetAttributes(keepFile, keepAttrs);
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Metadaten von {keepFile} konnten nicht vollständig wiederhergestellt werden: {ex.Message}");
+        }
+
+        // 3) Rückversicherung: Original-Inhalt in den Papierkorb (Tests: permanent).
+        try
+        {
+            RecycleBinHelper.DeleteFile(backup, sendToRecycleBin);
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Sicherung konnte nicht entsorgt werden ({ex.Message}) – liegt weiter unter: {backup}");
+        }
+
+        _logger.Debug($"Hardlink angelegt: {duplicate} -> {keepFile}");
+        return true;
+    }
+
+    // ---- Hardlink-Guards ----
+
+    /// <summary>
+    /// Prüft alle Voraussetzungen für eine Hardlink-Ersetzung. Liefert null,
+    /// wenn nichts dagegen spricht, sonst den Aktions-Code des Hindernisses.
+    /// <paramref name="pendingLinks"/> = im Probelauf bereits geplante Links auf
+    /// die Keep-Datei (der On-Disk-Linkcount wächst dort nicht); im echten Lauf 0.
+    /// Die Datei-Identität wird je Datei nur EINMAL gelesen; ist sie nicht
+    /// ermittelbar, wird konservativ übersprungen statt blind zu verlinken.
+    /// </summary>
+    internal static string? HardLinkBlocker(string keepFile, string duplicate, int pendingLinks)
+    {
+        if (!SameVolume(keepFile, duplicate)) return ActSkipOtherVolume;
+        if (!IsNtfs(keepFile)) return ActSkipNotNtfs;
+        if (IsReparsePoint(keepFile) || IsReparsePoint(duplicate)) return ActSkipReparsePoint;
+
+        bool okKeep = TryGetFileIdentity(keepFile, out uint vk, out ulong ik, out int keepLinks);
+        bool okDup  = TryGetFileIdentity(duplicate, out uint vd, out ulong id, out _);
+        if (!okKeep || !okDup) return ActSkipIdentityUnknown;
+        // Manche SMB-Server liefern FileID 0 für ALLE Dateien — dann wäre jedes
+        // Paar scheinbar "schon verlinkt". Identität 0 ist keine Identität.
+        if (ik == 0 && id == 0) return ActSkipIdentityUnknown;
+        if (vk == vd && ik == id) return ActSkipAlreadyLinked;
+        if (keepLinks + pendingLinks >= MaxHardLinksPerFile) return ActSkipLinkLimit;
+        return null;
+    }
+
+    private static string BlockerText(string code) => code switch
+    {
+        ActSkipOtherVolume     => "anderes Volume",
+        ActSkipNotNtfs         => "kein NTFS",
+        ActSkipReparsePoint    => "Reparse Point",
+        ActSkipAlreadyLinked   => "schon verlinkt",
+        ActSkipLinkLimit       => $"Hardlink-Limit ({MaxHardLinksPerFile} Links/Datei) erreicht",
+        ActSkipIdentityUnknown => "Datei-Identität nicht lesbar",
+        _                      => code
+    };
+
+    private static readonly Dictionary<string, bool> NtfsCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Prüft (mit Cache je Volume-Root), ob der Pfad auf NTFS liegt.</summary>
+    internal static bool IsNtfs(string path)
+    {
+        try
+        {
+            string root = Path.GetPathRoot(Path.GetFullPath(path)) ?? "";
+            if (root.Length == 0) return false;
+
+            // UNC-Pfade: DriveInfo wirft hier IMMER, das Dateisystem ist nicht
+            // bestimmbar. Versuch zulassen (v2.0.0 konnte Hardlinks über SMB);
+            // scheitert es wirklich, meldet CreateHardLink den Fehler pro Datei.
+            if (root.StartsWith(@"\\", StringComparison.Ordinal)) return true;
+
+            lock (NtfsCache)
             {
-                int err = Marshal.GetLastWin32Error();
-                throw new Win32Exception(err);
+                if (!NtfsCache.TryGetValue(root, out bool ntfs))
+                    NtfsCache[root] = ntfs = string.Equals(
+                        new DriveInfo(root).DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase);
+                return ntfs;
             }
+        }
+        catch { return false; } // UNC/unbekannt -> konservativ überspringen
+    }
 
-            // Erfolg: Sicherung verwerfen.
-            TryDelete(backup);
-            _logger.Debug($"Hardlink angelegt: {duplicate} -> {keepFile}");
+    private static bool IsReparsePoint(string path)
+    {
+        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+        catch { return false; } // nicht lesbar -> der eigentliche Schritt meldet den Fehler
+    }
+
+    // ---- File-Identity (GetFileInformationByHandle) ----
+
+    /// <summary>
+    /// True, wenn beide Pfade auf denselben NTFS-Dateieintrag zeigen (gleiche
+    /// Volume-Seriennummer + FileID), also bereits Hardlinks aufeinander sind.
+    /// </summary>
+    public static bool AreHardLinked(string a, string b)
+        => TryGetFileIdentity(a, out uint va, out ulong ia, out _)
+        && TryGetFileIdentity(b, out uint vb, out ulong ib, out _)
+        && va == vb && ia == ib;
+
+    /// <summary>Anzahl der Hardlinks der Datei; -1, wenn nicht ermittelbar.</summary>
+    public static int GetHardLinkCount(string path)
+        => TryGetFileIdentity(path, out _, out _, out int links) ? links : -1;
+
+    private static bool TryGetFileIdentity(string path, out uint volume, out ulong fileId, out int links)
+    {
+        volume = 0; fileId = 0; links = -1;
+        try
+        {
+            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            if (!GetFileInformationByHandle(handle, out var info)) return false;
+            volume = info.VolumeSerialNumber;
+            fileId = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
+            links  = (int)info.NumberOfLinks;
             return true;
         }
-        catch (Exception ex)
-        {
-            _logger.Error($"Hardlink fehlgeschlagen für {duplicate}: {ex.Message} – stelle Original wieder her.");
-            // Wiederherstellung aus der Sicherung versuchen.
-            try
-            {
-                if (!File.Exists(duplicate))
-                    File.Move(backup, duplicate);
-                else
-                    TryDelete(backup);
-            }
-            catch (Exception rex)
-            {
-                _logger.Error($"Wiederherstellung fehlgeschlagen für {duplicate}: {rex.Message}. " +
-                              $"Sicherung liegt unter: {backup}");
-            }
-            return false;
-        }
+        catch { return false; }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out ByHandleFileInformation lpFileInformation);
 
     private void TryDelete(string path)
     {

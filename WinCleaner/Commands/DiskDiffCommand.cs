@@ -43,6 +43,13 @@ public sealed class DiskDiffCommand : ICommand
             ctx.Logger.Info($"Hinweis: Snapshots stammen von verschiedenen Wurzeln " +
                             $"(\"{oldSnap.Root}\" vs. \"{newSnap.Root}\") – Vergleich kann irreführend sein.");
 
+        // Standard- und NTFS-Schnellscan behandeln Junctions unterschiedlich —
+        // gemischte Snapshots erzeugen Schein-Unterschiede.
+        if (!string.Equals(oldSnap.ScanMode, newSnap.ScanMode, StringComparison.OrdinalIgnoreCase))
+            ctx.Logger.Info($"Hinweis: Snapshots mit unterschiedlichem Scan-Modus " +
+                            $"(\"{oldSnap.ScanMode}\" vs. \"{newSnap.ScanMode}\") – " +
+                            "Junction-Einträge können als neu/entfernt erscheinen.");
+
         var diff = DiskSnapshot.Diff(oldSnap, newSnap);
 
         if (ctx.Json)
