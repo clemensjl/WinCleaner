@@ -33,9 +33,17 @@ public sealed class FindDuplicatesCommand : ICommand
 
         var protectedPaths = ParseProtected(ctx);
         bool hardLink = ctx.HasFlag("--hard-link");
+        bool delete = ctx.HasFlag("--delete");
+
+        // --delete und --hard-link schließen sich gegenseitig aus.
+        if (delete && hardLink)
+        {
+            ctx.Logger.Error("--delete und --hard-link schließen sich gegenseitig aus – bitte genau eine Aktion wählen.");
+            return 1;
+        }
 
         // Eine Aktion (Löschen/Hardlink) findet nur bei --delete oder --hard-link statt.
-        bool wantsAction = ctx.HasFlag("--delete") || hardLink;
+        bool wantsAction = delete || hardLink;
 
         // Sicherheits-Default: Probelauf. Echte Aktion nur mit --no-dry-run.
         bool dryRun = !ctx.HasFlag("--no-dry-run");
@@ -65,7 +73,8 @@ public sealed class FindDuplicatesCommand : ICommand
 
         if (groups.Count == 0)
         {
-            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, dryRun, hardLink, true));
+            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, 0, dryRun, hardLink, true,
+                Array.Empty<DuplicateFileAction>()));
             else Console.WriteLine("\nKeine Duplikate zur Bearbeitung.");
             return 0;
         }
@@ -112,6 +121,8 @@ public sealed class FindDuplicatesCommand : ICommand
                               $"({DiskAnalyzer.FormatSize(r.BytesAffected)}, je Gruppe eine Datei behalten).");
             if (r.GroupsSkipped > 0)
                 Console.WriteLine($"{r.GroupsSkipped} Gruppe(n) übersprungen (geschützt oder nicht verarbeitbar).");
+            if (r.FilesSkipped > 0)
+                Console.WriteLine($"{r.FilesSkipped} Datei(en) übersprungen (Details auf stderr, z. B. schon verlinkt oder anderes Volume).");
         }
         return 0;
     }
