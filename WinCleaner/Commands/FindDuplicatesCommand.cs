@@ -31,7 +31,7 @@ public sealed class FindDuplicatesCommand : ICommand
         try { keep = DuplicateFinder.ParseKeepStrategy(ctx.Option("--keep")); }
         catch (ArgumentException ex) { ctx.Logger.Error(ex.Message); return 1; }
 
-        var protectedPaths = ParseProtected(ctx);
+        var protectedPaths = KeepProtectOptions.ParseProtected(ctx);
         bool hardLink = ctx.HasFlag("--hard-link");
 
         // Eine Aktion (Löschen/Hardlink) findet nur bei --delete oder --hard-link statt.
@@ -143,37 +143,5 @@ public sealed class FindDuplicatesCommand : ICommand
         return Prompt.Confirm("Fortfahren?");
     }
 
-    /// <summary>
-    /// Sammelt alle --protect-Werte. Unterstützt mehrfaches Vorkommen
-    /// (<c>--protect a --protect b</c>) UND Kommatrennung je Vorkommen
-    /// (<c>--protect a,b</c>), in beiden Schreibweisen <c>--protect=...</c>.
-    /// </summary>
-    private static List<string> ParseProtected(CommandContext ctx)
-    {
-        var list = new List<string>();
-        var args = ctx.Args;
-        for (int i = 0; i < args.Length; i++)
-        {
-            string? value = null;
-            if (args[i].StartsWith("--protect=", StringComparison.OrdinalIgnoreCase))
-                value = args[i]["--protect=".Length..];
-            else if (string.Equals(args[i], "--protect", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-                value = args[++i];
-
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                list.Add(part);
-        }
-        return list;
-    }
-
-    private static string KeepLabel(KeepStrategy keep) => keep switch
-    {
-        KeepStrategy.First        => "erste Datei",
-        KeepStrategy.Oldest       => "älteste",
-        KeepStrategy.Newest       => "neueste",
-        KeepStrategy.ShortestPath => "kürzester Pfad",
-        KeepStrategy.LongestPath  => "längster Pfad",
-        _                         => "erste Datei"
-    };
+    private static string KeepLabel(KeepStrategy keep) => KeepProtectOptions.KeepLabel(keep);
 }

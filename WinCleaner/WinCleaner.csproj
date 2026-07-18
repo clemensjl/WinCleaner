@@ -21,6 +21,8 @@
     <ItemGroup>
         <!-- WMI-Zugriff für System-Wiederherstellungspunkte -->
         <PackageReference Include="System.Management" Version="8.0.0" />
+        <!-- GDI+ Bilddekodierung für find-similar-images (dHash); Windows-only, passt zum TFM -->
+        <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
     </ItemGroup>
 
     <ItemGroup>
