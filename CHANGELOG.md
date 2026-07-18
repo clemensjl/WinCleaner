@@ -35,6 +35,30 @@ duplicates, space-saving hard links and an interactive disk report.
   `--delete` and `--hard-link` are mutually exclusive.
 - Keep/protect option parsing shared between `find-duplicates` and
   `find-similar-images` (`KeepProtectOptions`).
+- Disk snapshots record the effective scan mode (`standard`/`ntfs-fast`);
+  `disk-diff` warns when comparing snapshots from different modes (junction
+  entries may appear as added/removed). Old snapshot files keep loading.
+- `NtfsFastScanner.IsSupported` additionally returns a typed block reason
+  (`FastScanBlockReason`); the GUI switches on it instead of matching
+  message text.
+
+### Fixed
+- Hard-link replacement no longer transfers the duplicate's attributes and
+  creation time onto the kept file (Win32 `ReplaceFile` metadata semantics
+  on a shared file record).
+- Duplicate/image actions report real per-file sizes instead of the group
+  average — relevant for similar images of different sizes (console,
+  `--json` and GUI dialogs).
+- Hard links across UNC/SMB paths work again (regression vs. 2.0.0:
+  everything was skipped as "not NTFS").
+- The 1024-links-per-file limit is enforced for planned links in dry runs
+  too, so preview and execution match; unreadable file identity now causes
+  a conservative skip (new `--json` action code `skip-identity-unknown`).
+- `find-similar-images` drops `.webp` (GDI+ cannot decode WebP) and lists
+  skipped files like `find-duplicates` does.
+- GUI: the fast-scan preflight checks whether the installed CLI knows
+  `--fast` before showing a UAC prompt; failure messages include the exit
+  code; path/support checks no longer block the UI thread.
 
 ## [2.0.0] - 2026-07-05
 
