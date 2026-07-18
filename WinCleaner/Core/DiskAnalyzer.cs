@@ -49,19 +49,25 @@ public sealed class DiskFilter
         AgeDays is not null;
 
     /// <summary>Prüft, ob eine Datei alle gesetzten Kriterien erfüllt.</summary>
-    public bool Matches(FileInfo info)
+    public bool Matches(FileInfo info) => Matches(info.FullName, info.Length, info.LastWriteTime);
+
+    /// <summary>
+    /// Wie <see cref="Matches(FileInfo)"/>, aber ohne FileInfo-Zugriff — für den
+    /// NTFS-Schnellscan, der Größe und Zeitstempel bereits kennt.
+    /// </summary>
+    public bool Matches(string filePath, long lengthBytes, DateTime lastWriteTime)
     {
-        if (MinSizeBytes is { } min && info.Length < min) return false;
+        if (MinSizeBytes is { } min && lengthBytes < min) return false;
 
         if (Extensions is { Count: > 0 })
         {
-            var ext = info.Extension.ToLowerInvariant();
+            var ext = Path.GetExtension(filePath).ToLowerInvariant();
             if (!Extensions.Contains(ext)) return false;
         }
 
         if (AgeDays is { } days)
         {
-            var ageDays = (DateTime.Now - info.LastWriteTime).TotalDays;
+            var ageDays = (DateTime.Now - lastWriteTime).TotalDays;
             if (days >= 0)
             {
                 // Nur Dateien, die ÄLTER als n Tage sind.
@@ -87,6 +93,9 @@ public sealed class DiskFilter
 /// </summary>
 public class DiskAnalyzer
 {
+    /// <summary>Gruppen-Label für Dateien ohne Endung (auch vom NTFS-Schnellscan genutzt).</summary>
+    internal const string NoExtensionLabel = "(ohne Endung)";
+
     private static readonly EnumerationOptions DeepOpts = new()
     {
         RecurseSubdirectories = true,
@@ -178,7 +187,7 @@ public class DiskAnalyzer
                 if (filter is not null && !filter.Matches(info)) continue;
 
                 var ext = info.Extension.ToLowerInvariant();
-                if (string.IsNullOrEmpty(ext)) ext = "(ohne Endung)";
+                if (string.IsNullOrEmpty(ext)) ext = NoExtensionLabel;
 
                 var cur = byExt.TryGetValue(ext, out var v) ? v : (0L, 0);
                 byExt[ext] = (cur.Item1 + info.Length, cur.Item2 + 1);

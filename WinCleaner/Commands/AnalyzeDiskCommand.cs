@@ -10,12 +10,12 @@ public sealed class AnalyzeDiskCommand : ICommand
     public string Name => "analyze-disk";
     public string Summary => "Größte Ordner/Dateien anzeigen (Filter, nach Endung, Export)";
     public string Usage =>
-        "<Pfad> [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
+        "<Pfad> [--fast] [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
         "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>]";
 
     public string[] AllowedFlags => new[]
     {
-        "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out"
+        "--fast", "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out"
     };
 
     public int Execute(CommandContext ctx)
@@ -100,11 +100,19 @@ public sealed class AnalyzeDiskCommand : ICommand
         }
 
         var analyzer = new DiskAnalyzer(ctx.Logger);
+        var activeFilter = filter.IsActive ? filter : null;
+
+        // --fast: NTFS-Schnellscan (MFT/USN); fällt bei fehlenden Adminrechten,
+        // Nicht-NTFS oder Fehlern automatisch auf den Standard-Scan zurück
+        // (Meldung auf stderr). Ausgabeformat ist in beiden Fällen identisch.
+        bool fast = ctx.HasFlag("--fast");
+        var fastScanner = fast ? new NtfsFastScanner(ctx.Logger) : null;
 
         // ---- Modus: nach Endung gruppiert ----
         if (byType)
         {
-            var ext = analyzer.AnalyzeByExtension(path, top, filter.IsActive ? filter : null);
+            var ext = fastScanner?.TryAnalyzeByExtension(path, top, activeFilter)
+                      ?? analyzer.AnalyzeByExtension(path, top, activeFilter);
             long extTotal = ext.TotalBytes;
 
             if (ctx.Json)
@@ -129,7 +137,8 @@ public sealed class AnalyzeDiskCommand : ICommand
         }
 
         // ---- Modus: Top-Level-Einträge (Standardverhalten) ----
-        var analysis = analyzer.Analyze(path, top, filter.IsActive ? filter : null, depth);
+        var analysis = fastScanner?.TryAnalyze(path, top, activeFilter, depth)
+                       ?? analyzer.Analyze(path, top, activeFilter, depth);
         long total = analysis.TotalBytes;
 
         if (ctx.Json)
