@@ -173,8 +173,11 @@ public sealed class AnalyzeDiskCommand : ICommand
         // spätere disk-diff auch kleine, aber gewachsene Pfade sieht; die
         // Anzeige bleibt bei Top-N.
         var topN = snapshotPath is null ? top : int.MaxValue;
-        var analysis = fastScanner?.TryAnalyze(path, topN, activeFilter, depth)
-                       ?? analyzer.Analyze(path, topN, activeFilter, depth);
+        // Effektiven Modus festhalten: --fast kann still auf den Standard-Scan
+        // zurückfallen — der Snapshot muss den tatsächlich gelaufenen Modus tragen.
+        var fastResult = fastScanner?.TryAnalyze(path, topN, activeFilter, depth);
+        var analysis = fastResult ?? analyzer.Analyze(path, topN, activeFilter, depth);
+        bool usedFast = fastResult is not null;
         long total = analysis.TotalBytes;
         var shown = analysis.Entries.Take(top).ToList();
 
@@ -200,7 +203,8 @@ public sealed class AnalyzeDiskCommand : ICommand
         {
             try
             {
-                DiskSnapshot.FromAnalysis(Path.GetFullPath(path), analysis).Save(snapshotPath);
+                DiskSnapshot.FromAnalysis(Path.GetFullPath(path), analysis,
+                    scanMode: usedFast ? "ntfs-fast" : "standard").Save(snapshotPath);
                 ctx.Logger.Info($"Snapshot gespeichert: {Path.GetFullPath(snapshotPath)} " +
                                 $"({analysis.Entries.Count} Einträge). Vergleich: disk-diff <alt> <neu>.");
             }

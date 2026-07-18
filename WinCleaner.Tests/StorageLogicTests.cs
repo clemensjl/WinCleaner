@@ -54,6 +54,18 @@ public class StorageLogicTests
         Assert.Contains(@"analyze-disk C:\Fotos --fast --top 25 --snapshot C:\snap.json", args);
     }
 
+    // ---- CLI-Preflight für den elevated Schnellscan ----
+
+    [Theory]
+    [InlineData("analyze-disk <Pfad> [--fast] [--by-type]\n  Optionen: --fast, --top", true)]
+    [InlineData("analyze-disk <Pfad> [--by-type] [--top <n>]\n  Optionen: --by-type, --top", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void CliSupportsFastScan_DetectsFastFlagInHelpOutput(string? helpOutput, bool expected)
+    {
+        Assert.Equal(expected, StorageLogic.CliSupportsFastScan(helpOutput));
+    }
+
     // ---- Snapshot -> Analyse ----
 
     [Fact]

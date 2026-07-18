@@ -88,22 +88,37 @@ public sealed class StorageViewModel : PageViewModelBase
 
     private async Task AnalyzeAsync() => await RunAsync(async () =>
     {
-        if (!Directory.Exists(Path)) { Dialogs.Info("Pfad nicht gefunden: " + Path); return; }
-
+        string path = Path;
+        bool fastScan = FastScan;
         var logger = Shell.NewLogger();
         DiskAnalysis? analysis = null;
         string mode = "Standard-Scan";
 
-        if (FastScan)
+        // Directory.Exists und IsSupported machen Datei-I/O und können z. B. bei
+        // einer schlafenden HDD sekundenlang blockieren — nie auf dem
+        // Dispatcher-Thread ausführen, sondern im Hintergrund prüfen.
+        Shell.Status("Prüfe Pfad…");
+        var pre = await Task.Run<(bool Exists, bool FastOk, string Reason, FastScanBlockReason Block)>(() =>
         {
-            if (NtfsFastScanner.IsSupported(Path, out string reason))
+            if (!Directory.Exists(path))
+                return (false, false, "", FastScanBlockReason.NotFound);
+            if (!fastScan)
+                return (true, false, "", FastScanBlockReason.None);
+            bool ok = NtfsFastScanner.IsSupported(path, out string reason, out var block);
+            return (true, ok, reason, block);
+        });
+        if (!pre.Exists) { Dialogs.Info("Pfad nicht gefunden: " + path); return; }
+
+        if (fastScan)
+        {
+            if (pre.FastOk)
             {
                 // Prozess läuft bereits mit Adminrechten: Schnellscan direkt in-process.
                 Shell.Status("Schneller NTFS-Scan…");
-                analysis = await Task.Run(() => new NtfsFastScanner(logger).TryAnalyze(Path, TopCount));
+                analysis = await Task.Run(() => new NtfsFastScanner(logger).TryAnalyze(path, TopCount));
                 if (analysis is not null) mode = "NTFS-Schnellscan";
             }
-            else if (reason.Contains("Adminrechte", StringComparison.OrdinalIgnoreCase))
+            else if (pre.Block == FastScanBlockReason.NeedsAdmin)
             {
                 // Einziges Hindernis sind fehlende Adminrechte (die Prüfung testet
                 // Rechte zuletzt) -> bewährter Admin-Pfad der GUI: CLI per UAC
@@ -114,15 +129,15 @@ public sealed class StorageViewModel : PageViewModelBase
             }
             else
             {
-                Shell.Status($"Schnellscan nicht möglich ({reason}) – Standard-Scan läuft…");
+                Shell.Status($"Schnellscan nicht möglich ({pre.Reason}) – Standard-Scan läuft…");
             }
         }
 
         if (analysis is null)
         {
-            if (FastScan) mode = "Standard-Scan (Fallback)";
+            if (fastScan) mode = "Standard-Scan (Fallback)";
             else Shell.Status("Analysiere Speicher…");
-            analysis = await Task.Run(() => new DiskAnalyzer(logger).Analyze(Path, TopCount));
+            analysis = await Task.Run(() => new DiskAnalyzer(logger).Analyze(path, TopCount));
         }
 
         DiskItems.Clear();
@@ -139,6 +154,18 @@ public sealed class StorageViewModel : PageViewModelBase
     /// </summary>
     private async Task<DiskAnalysis?> RunFastScanElevatedAsync()
     {
+        // Preflight OHNE Elevation: kennt die aufgelöste CLI --fast überhaupt?
+        // Eine ältere installierte CLI (< 2.1.0) würde sonst erst NACH dem
+        // UAC-Prompt mit "Unbekannte Option" scheitern.
+        Shell.Status("Prüfe installierte WinCleaner-CLI…");
+        bool cliOk = await Task.Run(() => ProbeCliSupportsFastScan(ElevatedCli.ResolveCliPath()));
+        if (!cliOk)
+        {
+            Shell.Status("Schnellscan nicht möglich: installierte WinCleaner-CLI ist zu alt " +
+                         "(braucht mindestens 2.1.0) – Standard-Scan läuft…");
+            return null;
+        }
+
         string snapFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
             $"wincleaner-fastscan-{Guid.NewGuid():N}.json");
         try
@@ -149,7 +176,8 @@ public sealed class StorageViewModel : PageViewModelBase
 
             if (!r.Success || !File.Exists(snapFile))
             {
-                Shell.Status($"Schnellscan nicht möglich ({r.Error ?? "CLI-Lauf fehlgeschlagen"}) " +
+                Shell.Status($"Schnellscan nicht möglich " +
+                             $"({r.Error ?? $"CLI-Lauf fehlgeschlagen (ExitCode {r.ExitCode})"}) " +
                              "– Standard-Scan läuft…");
                 return null;
             }
@@ -165,6 +193,41 @@ public sealed class StorageViewModel : PageViewModelBase
         finally
         {
             try { if (File.Exists(snapFile)) File.Delete(snapFile); } catch { /* Temp-Rest */ }
+        }
+    }
+
+    /// <summary>
+    /// Fragt die CLI nicht-elevated nach ihrer analyze-disk-Hilfe und prüft per
+    /// <see cref="StorageLogic.CliSupportsFastScan"/>, ob sie --fast kennt.
+    /// Fehler oder Timeout (~5 s) gelten konservativ als "kennt --fast nicht".
+    /// </summary>
+    private static bool ProbeCliSupportsFastScan(string cliPath)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName               = cliPath,
+                Arguments              = "--help analyze-disk",
+                UseShellExecute        = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow         = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc is null) return false;
+
+            var stdout = proc.StandardOutput.ReadToEndAsync();
+            if (!proc.WaitForExit(5000))
+            {
+                try { proc.Kill(); } catch { /* schon beendet */ }
+                return false;
+            }
+            return StorageLogic.CliSupportsFastScan(
+                stdout.Wait(1000) ? stdout.Result : null);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -257,7 +320,7 @@ public sealed class StorageViewModel : PageViewModelBase
             Shell.Status("Keine Duplikate für die Hardlink-Ersetzung geeignet.");
             Dialogs.Info(plan.FilesSkipped > 0
                 ? $"Nichts zu ersetzen: {plan.FilesSkipped} Dateien nicht geeignet " +
-                  "(anderes Volume, kein NTFS oder bereits verlinkt)."
+                  "(z. B. anderes Volume, kein NTFS, bereits verlinkt oder Datei-Identität nicht lesbar)."
                 : "Nichts zu ersetzen.", "Durch Hardlinks ersetzen");
             return;
         }

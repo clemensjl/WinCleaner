@@ -131,6 +131,8 @@ public sealed class FindSimilarImagesCommand : ICommand
                               $"({DiskAnalyzer.FormatSize(r.BytesAffected)}, je Gruppe eine Datei behalten).");
             if (r.GroupsSkipped > 0)
                 Console.WriteLine($"{r.GroupsSkipped} Gruppe(n) übersprungen (geschützt oder nicht verarbeitbar).");
+            if (r.FilesSkipped > 0)
+                Console.WriteLine($"{r.FilesSkipped} Datei(en) übersprungen (Details auf stderr, z. B. gesperrt oder nicht löschbar).");
         }
         return 0;
     }
@@ -139,9 +141,26 @@ public sealed class FindSimilarImagesCommand : ICommand
         IReadOnlyCollection<string> protectedPaths, KeepStrategy keep)
     {
         int files = groups.Sum(g => Math.Max(0, g.Files.Count - 1));
-        long bytes = groups.Sum(g => g.Files.Count > 0
-            ? (g.TotalBytes / g.Files.Count) * (g.Files.Count - 1)
-            : 0);
+
+        // Obergrenze der Ersparnis mit ECHTEN Dateigrößen: Similar-Image-Gruppen
+        // enthalten ungleich große Dateien, ein Gruppen-Durchschnitt wäre falsch.
+        // Je Gruppe bleibt eine Datei erhalten — im ungünstigsten Fall die kleinste.
+        long bytes = 0;
+        foreach (var g in groups)
+        {
+            if (g.Files.Count < 2) continue;
+            long avg = g.TotalBytes / g.Files.Count; // Fallback für unlesbare Dateien
+            long sum = 0, min = long.MaxValue;
+            foreach (var f in g.Files)
+            {
+                long size;
+                try { size = new FileInfo(f).Length; }
+                catch { size = avg; }
+                sum += size;
+                min = Math.Min(min, size);
+            }
+            bytes += sum - min;
+        }
 
         Console.Error.WriteLine($"\nBis zu {files} ähnliche Bilder ({DiskAnalyzer.FormatSize(bytes)}) werden in den " +
                                 $"Papierkorb verschoben (je Gruppe bleibt eines erhalten, Strategie: {KeepProtectOptions.KeepLabel(keep)}).");

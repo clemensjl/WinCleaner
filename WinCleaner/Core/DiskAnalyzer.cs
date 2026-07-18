@@ -362,7 +362,7 @@ public class DiskAnalyzer
     {
         if (byExt is null) return;
         var ext = info.Extension.ToLowerInvariant();
-        if (string.IsNullOrEmpty(ext)) ext = "(ohne Endung)";
+        if (string.IsNullOrEmpty(ext)) ext = NoExtensionLabel;
         var cur = byExt.TryGetValue(ext, out var v) ? v : (0L, 0);
         byExt[ext] = (cur.Item1 + info.Length, cur.Item2 + 1);
     }

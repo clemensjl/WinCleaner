@@ -231,6 +231,44 @@ public class NtfsFastScannerTests
         Assert.False(string.IsNullOrWhiteSpace(reason));
     }
 
+    // ---- Typisierter Grund (GUI reagiert auf den Enum, nicht auf Freitext) ----
+
+    [Fact]
+    public void IsSupported_MissingPath_ReportsTypedNotFound()
+    {
+        Assert.False(NtfsFastScanner.IsSupported(@"X:\gibt\es\nicht", out _, out var block));
+        Assert.Equal(FastScanBlockReason.NotFound, block);
+    }
+
+    [Fact]
+    public void IsSupported_JunctionRoot_ReportsTypedReparseRoot()
+    {
+        using var dir = new TempDir();
+        var target = Directory.CreateDirectory(System.IO.Path.Combine(dir.Path, "target")).FullName;
+        var junction = System.IO.Path.Combine(dir.Path, "junction");
+
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            $"/c mklink /J \"{junction}\" \"{target}\"")
+        { CreateNoWindow = true, UseShellExecute = false };
+        using (var p = System.Diagnostics.Process.Start(psi)) p!.WaitForExit();
+        if (!Directory.Exists(junction)) return; // Nicht-NTFS-Temp -> nicht prüfbar
+
+        Assert.False(NtfsFastScanner.IsSupported(junction, out _, out var block));
+        Assert.Equal(FastScanBlockReason.ReparseRoot, block);
+    }
+
+    [Fact]
+    public void IsSupported_SupportedOrAdminBlocked_MatchesElevationState()
+    {
+        // Auf dem lokalen NTFS-Dev-Laufwerk hängt das Ergebnis nur noch von den
+        // Adminrechten ab: ohne Admin muss der typisierte Grund NeedsAdmin sein.
+        using var dir = new TempDir();
+        bool ok = NtfsFastScanner.IsSupported(dir.Path, out _, out var block);
+
+        if (ok) Assert.Equal(FastScanBlockReason.None, block);
+        else Assert.Equal(FastScanBlockReason.NeedsAdmin, block);
+    }
+
     [Fact]
     public void TryAnalyze_MissingPath_ReturnsNull_InsteadOfThrowing()
     {

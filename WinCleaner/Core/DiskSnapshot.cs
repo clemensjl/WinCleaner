@@ -43,14 +43,26 @@ public sealed class DiskSnapshot
     public required string Root { get; init; }
     public DateTime CreatedUtc { get; init; }
     public long TotalBytes { get; init; }
+
+    /// <summary>
+    /// Effektiver Scan-Modus ("standard" oder "ntfs-fast"). Wichtig für disk-diff:
+    /// die Modi behandeln Junction-Einträge unterschiedlich, ein Vergleich über
+    /// Modi hinweg kann Schein-Unterschiede zeigen. Default "standard", damit
+    /// ältere Snapshot-Dateien ohne dieses Feld (Formatkennung bleibt
+    /// wincleaner-disk-snapshot/1) weiter laden.
+    /// </summary>
+    public string ScanMode { get; init; } = "standard";
+
     public List<SnapshotEntry> Entries { get; init; } = new();
 
     /// <summary>Baut einen Snapshot aus einem Analyse-Ergebnis.</summary>
-    public static DiskSnapshot FromAnalysis(string root, DiskAnalysis analysis, DateTime? createdUtc = null) => new()
+    public static DiskSnapshot FromAnalysis(string root, DiskAnalysis analysis,
+                                            DateTime? createdUtc = null, string scanMode = "standard") => new()
     {
         Root       = root,
         CreatedUtc = createdUtc ?? DateTime.UtcNow,
         TotalBytes = analysis.TotalBytes,
+        ScanMode   = scanMode,
         Entries    = analysis.Entries
             .Select(e => new SnapshotEntry(e.Path, e.Bytes, e.Files, e.IsDir))
             .ToList()

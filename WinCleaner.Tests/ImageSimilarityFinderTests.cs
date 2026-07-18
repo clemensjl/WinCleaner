@@ -184,7 +184,6 @@ public class ImageSimilarityFinderTests
         using (var b1 = HorizontalGradient(64, 64)) Save(dir, "a.png", b1, ImageFormat.Png);
         using (var b2 = HorizontalGradient(96, 96)) Save(dir, "b.png", b2, ImageFormat.Png);
         dir.Write("kaputt.png", "kein Bild");
-        dir.Write("kaputt.webp", "auch kein Bild");
 
         var groups = NewFinder().Find(dir.Path, recurse: false, threshold: 5);
 
@@ -200,6 +199,9 @@ public class ImageSimilarityFinderTests
         using (var b1 = HorizontalGradient(64, 64)) Save(dir, "a.png", b1, ImageFormat.Png);
         dir.Write("notes.txt", "Text");
         dir.Write("data.bin", "Binaer");
+        // .webp ist KEIN Kandidat mehr (GDI+ dekodiert WebP nie) — die Datei
+        // zählt gar nicht, statt als "nicht dekodierbar" übersprungen zu werden.
+        dir.Write("foto.webp", "RIFF-Fake");
 
         Assert.Empty(NewFinder().Find(dir.Path, recurse: false, threshold: 5));
     }

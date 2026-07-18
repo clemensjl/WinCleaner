@@ -37,6 +37,16 @@ public static class StorageLogic
         $"--snapshot {ElevatedCli.Quote(snapshotFile)}";
 
     /// <summary>
+    /// Preflight für den elevated Schnellscan: erkennt an der analyze-disk-Hilfe
+    /// der CLI (<c>--help analyze-disk</c>), ob sie <c>--fast</c> unterstützt.
+    /// Ältere CLIs (&lt; 2.1.0) würden sonst erst nach dem UAC-Prompt mit
+    /// "Unbekannte Option" scheitern. null/leer = nicht unterstützt.
+    /// </summary>
+    public static bool CliSupportsFastScan(string? helpOutput) =>
+        !string.IsNullOrEmpty(helpOutput) &&
+        helpOutput.Contains("--fast", StringComparison.Ordinal);
+
+    /// <summary>
     /// Wandelt eine Snapshot-Datei (Rückkanal des elevated Schnellscans) in das
     /// Analyse-Ergebnis der Seite um: absteigend sortiert, auf Top-N begrenzt.
     /// </summary>
@@ -67,7 +77,7 @@ public static class StorageLogic
                       "Die ersetzten Originale wandern in den Papierkorb.");
         if (plan.FilesSkipped > 0)
             sb.AppendLine($"{plan.FilesSkipped} Dateien werden übersprungen " +
-                          "(anderes Volume, kein NTFS oder bereits verlinkt).");
+                          "(z. B. anderes Volume, kein NTFS, bereits verlinkt oder Datei-Identität nicht lesbar).");
         sb.AppendLine();
         sb.Append("Jetzt ersetzen?");
         return sb.ToString();

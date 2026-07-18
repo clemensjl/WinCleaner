@@ -26,9 +26,13 @@ public class ImageSimilarityFinder
     /// <summary>Maximal sinnvolle Schwelle; darueber gruppiert sich fast alles.</summary>
     public const int MaxThreshold = 16;
 
+    // Nur Formate, die GDI+ tatsächlich dekodiert. .webp bewusst NICHT dabei:
+    // System.Drawing kann WebP nie öffnen (auch nicht mit installierter
+    // WIC-Extension) — jede .webp-Datei würde nur als "nicht dekodierbar"
+    // Lärm erzeugen.
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"
+        ".jpg", ".jpeg", ".png", ".bmp", ".gif"
     };
 
     private readonly Logger _logger;

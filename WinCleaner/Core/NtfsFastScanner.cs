@@ -9,6 +9,31 @@ namespace WinCleaner.Core;
 public readonly record struct FastFile(string Path, long Bytes, DateTime LastWriteTime);
 
 /// <summary>
+/// Typisierter Grund, warum der NTFS-Schnellscan nicht möglich ist. Ergänzt den
+/// Freitext von <see cref="NtfsFastScanner.IsSupported(string, out string, out FastScanBlockReason)"/>,
+/// damit Aufrufer (z. B. die GUI) nicht auf Meldungstexte matchen müssen.
+/// </summary>
+public enum FastScanBlockReason
+{
+    /// <summary>Kein Hindernis — Schnellscan möglich.</summary>
+    None,
+    /// <summary>Kein Windows-Betriebssystem.</summary>
+    NotWindows,
+    /// <summary>Pfad ungültig oder Attribute nicht lesbar.</summary>
+    InvalidPath,
+    /// <summary>Pfad existiert nicht.</summary>
+    NotFound,
+    /// <summary>Scan-Wurzel ist selbst ein Reparse Point (Junction/Symlink).</summary>
+    ReparseRoot,
+    /// <summary>Kein lokales Laufwerk (z. B. UNC-Pfad).</summary>
+    NotLocal,
+    /// <summary>Kein NTFS-Volume (oder Dateisystem nicht bestimmbar).</summary>
+    NotNtfs,
+    /// <summary>Fehlende Adminrechte für den Raw-Volume-Zugriff.</summary>
+    NeedsAdmin
+}
+
+/// <summary>
 /// WizTree-artiger NTFS-Schnellscan (Roadmap M11) als Alternative zur
 /// Directory.EnumerateFiles-Enumeration in <see cref="DiskAnalyzer"/>.
 ///
@@ -52,21 +77,37 @@ public sealed class NtfsFastScanner
     /// NTFS-Laufwerk, Adminrechte). <paramref name="reason"/> nennt sonst den Grund.
     /// </summary>
     public static bool IsSupported(string rootPath, out string reason)
+        => IsSupported(rootPath, out reason, out _);
+
+    /// <summary>
+    /// Wie <see cref="IsSupported(string, out string)"/>, liefert zusätzlich den
+    /// typisierten Grund — Aufrufer sollen auf <paramref name="block"/> statt auf
+    /// den Freitext (Anzeige) reagieren.
+    /// </summary>
+    public static bool IsSupported(string rootPath, out string reason, out FastScanBlockReason block)
     {
         reason = "";
+        block = FastScanBlockReason.None;
         if (!OperatingSystem.IsWindows())
         {
             reason = "kein Windows";
+            block = FastScanBlockReason.NotWindows;
             return false;
         }
 
         string full;
         try { full = Path.GetFullPath(rootPath); }
-        catch { reason = $"ungültiger Pfad: {rootPath}"; return false; }
+        catch
+        {
+            reason = $"ungültiger Pfad: {rootPath}";
+            block = FastScanBlockReason.InvalidPath;
+            return false;
+        }
 
         if (!Directory.Exists(full))
         {
             reason = $"Pfad nicht gefunden: {rootPath}";
+            block = FastScanBlockReason.NotFound;
             return false;
         }
 
@@ -78,12 +119,14 @@ public sealed class NtfsFastScanner
             if ((File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0)
             {
                 reason = "Scan-Wurzel ist ein Reparse Point (Junction/Symlink)";
+                block = FastScanBlockReason.ReparseRoot;
                 return false;
             }
         }
         catch
         {
             reason = $"Attribute nicht lesbar: {rootPath}";
+            block = FastScanBlockReason.InvalidPath;
             return false;
         }
 
@@ -91,22 +134,30 @@ public sealed class NtfsFastScanner
         if (string.IsNullOrEmpty(driveRoot) || driveRoot.StartsWith(@"\\", StringComparison.Ordinal))
         {
             reason = "kein lokales Laufwerk (UNC-Pfade werden nicht unterstützt)";
+            block = FastScanBlockReason.NotLocal;
             return false;
         }
 
         string format;
         try { format = new DriveInfo(driveRoot).DriveFormat; }
-        catch { reason = $"Laufwerk {driveRoot} nicht lesbar"; return false; }
+        catch
+        {
+            reason = $"Laufwerk {driveRoot} nicht lesbar";
+            block = FastScanBlockReason.NotNtfs;
+            return false;
+        }
 
         if (!string.Equals(format, "NTFS", StringComparison.OrdinalIgnoreCase))
         {
             reason = $"Dateisystem {format} statt NTFS";
+            block = FastScanBlockReason.NotNtfs;
             return false;
         }
 
         if (!Elevation.IsAdministrator())
         {
             reason = "keine Adminrechte für Raw-Volume-Zugriff";
+            block = FastScanBlockReason.NeedsAdmin;
             return false;
         }
 
