@@ -5,6 +5,37 @@ All notable changes to WinCleaner are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-19
+
+Closes the remaining feasible items from the competitive gap analysis
+(`docs/research/99-gap-analyse.md`): fast NTFS scanning, visual image
+duplicates, space-saving hard links and an interactive disk report.
+
+### Added
+- **`analyze-disk --fast`** (M11) — NTFS fast scan: directory tree via USN
+  enumeration (`FSCTL_ENUM_USN_DATA`), sizes via large-fetch enumeration.
+  Requires elevation and NTFS; falls back to the standard scanner with a
+  stderr notice otherwise. Output and JSON structure are identical to the
+  standard scan. Junctions/reparse points are never followed.
+- **`find-similar-images <path>`** (M8) — finds visually similar images
+  (rescaled/recompressed copies) via 64-bit dHash and Hamming-distance
+  clustering (`--threshold 0-16`, `--recurse`). Same safety flow as
+  `find-duplicates`: dry-run by default, recycle bin, `--keep`/`--protect`.
+- **`find-duplicates --hard-link`** (M7, hardened) — replaces duplicates with
+  NTFS hard links via temp-link + atomic `File.Replace` swap and recycle-bin
+  backup. Guards: same volume, NTFS only, reparse points, 1024-link limit,
+  already-linked detection via file IDs. Per-action detail in `--json`.
+- **`analyze-disk --html <report.html>`** (N6) — self-contained interactive
+  HTML report: squarified treemap with click-zoom, breadcrumb and tooltips,
+  top-directory table, size-by-extension breakdown; light/dark via
+  `prefers-color-scheme`; no external requests.
+
+### Changed
+- `find-duplicates` reports skipped files and per-file actions in `--json`;
+  `--delete` and `--hard-link` are mutually exclusive.
+- Keep/protect option parsing shared between `find-duplicates` and
+  `find-similar-images` (`KeepProtectOptions`).
+
 ## [2.0.0] - 2026-07-05
 
 Adds a real graphical desktop application (**WinCleaner.Gui**, WPF) alongside
