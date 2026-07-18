@@ -85,7 +85,7 @@ public sealed class FindSimilarImagesCommand : ICommand
 
         if (dupGroups.Count == 0)
         {
-            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, dryRun, false, true));
+            if (ctx.Json) JsonOut.Write(new DuplicateActionResult(0, 0, 0, 0, 0, dryRun, false, true, Array.Empty<DuplicateFileAction>()));
             else Console.WriteLine("\nKeine ähnlichen Bilder zur Bearbeitung.");
             return 0;
         }
