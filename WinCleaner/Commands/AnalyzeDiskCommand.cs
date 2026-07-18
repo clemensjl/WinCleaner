@@ -10,13 +10,13 @@ public sealed class AnalyzeDiskCommand : ICommand
     public string Name => "analyze-disk";
     public string Summary => "Größte Ordner/Dateien anzeigen (Filter, nach Endung, Export)";
     public string Usage =>
-        "<Pfad> [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
+        "<Pfad> [--fast] [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
         "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>] " +
         "[--snapshot <Datei>]";
 
     public string[] AllowedFlags => new[]
     {
-        "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
+        "--fast", "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
         "--snapshot"
     };
 
@@ -109,11 +109,19 @@ public sealed class AnalyzeDiskCommand : ICommand
         }
 
         var analyzer = new DiskAnalyzer(ctx.Logger);
+        var activeFilter = filter.IsActive ? filter : null;
+
+        // --fast: NTFS-Schnellscan (MFT/USN); fällt bei fehlenden Adminrechten,
+        // Nicht-NTFS oder Fehlern automatisch auf den Standard-Scan zurück
+        // (Meldung auf stderr). Ausgabeformat ist in beiden Fällen identisch.
+        bool fast = ctx.HasFlag("--fast");
+        var fastScanner = fast ? new NtfsFastScanner(ctx.Logger) : null;
 
         // ---- Modus: nach Endung gruppiert ----
         if (byType)
         {
-            var ext = analyzer.AnalyzeByExtension(path, top, filter.IsActive ? filter : null);
+            var ext = fastScanner?.TryAnalyzeByExtension(path, top, activeFilter)
+                      ?? analyzer.AnalyzeByExtension(path, top, activeFilter);
             long extTotal = ext.TotalBytes;
 
             if (ctx.Json)
@@ -141,8 +149,9 @@ public sealed class AnalyzeDiskCommand : ICommand
         // Für einen Snapshot ALLE Einträge messen (nicht nur Top-N), damit der
         // spätere disk-diff auch kleine, aber gewachsene Pfade sieht; die
         // Anzeige bleibt bei Top-N.
-        var analysis = analyzer.Analyze(path, snapshotPath is null ? top : int.MaxValue,
-                                        filter.IsActive ? filter : null, depth);
+        var topN = snapshotPath is null ? top : int.MaxValue;
+        var analysis = fastScanner?.TryAnalyze(path, topN, activeFilter, depth)
+                       ?? analyzer.Analyze(path, topN, activeFilter, depth);
         long total = analysis.TotalBytes;
         var shown = analysis.Entries.Take(top).ToList();
 
