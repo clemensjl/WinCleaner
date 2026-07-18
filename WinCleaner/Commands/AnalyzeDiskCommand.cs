@@ -12,12 +12,12 @@ public sealed class AnalyzeDiskCommand : ICommand
     public string Usage =>
         "<Pfad> [--fast] [--by-type] [--min-size <z.B.100MB>] [--type <.ext,.ext>] " +
         "[--age-days <n>] [--depth <n>] [--top <n>] [--export csv|html] [--out <Pfad>] " +
-        "[--snapshot <Datei>]";
+        "[--snapshot <Datei>] [--html <report.html>]";
 
     public string[] AllowedFlags => new[]
     {
         "--fast", "--by-type", "--min-size", "--type", "--age-days", "--depth", "--top", "--export", "--out",
-        "--snapshot"
+        "--snapshot", "--html"
     };
 
     public int Execute(CommandContext ctx)
@@ -108,6 +108,23 @@ public sealed class AnalyzeDiskCommand : ICommand
             return 1;
         }
 
+        // Interaktiver HTML-Treemap-Report (zusätzlich zur normalen Ausgabe).
+        // Präsenz über beide Schreibweisen erkennen (--html pfad UND --html=pfad).
+        string? htmlPath = null;
+        bool htmlRequested = ctx.Args.Any(a =>
+            string.Equals(a, "--html", StringComparison.OrdinalIgnoreCase) ||
+            a.StartsWith("--html=", StringComparison.OrdinalIgnoreCase));
+        if (htmlRequested)
+        {
+            htmlPath = ctx.Option("--html");
+            if (string.IsNullOrWhiteSpace(htmlPath) ||
+                htmlPath.StartsWith("--", StringComparison.Ordinal))
+            {
+                ctx.Logger.Error("--html braucht einen Zielpfad, z.B. --html report.html.");
+                return 1;
+            }
+        }
+
         var analyzer = new DiskAnalyzer(ctx.Logger);
         var activeFilter = filter.IsActive ? filter : null;
 
@@ -137,6 +154,12 @@ public sealed class AnalyzeDiskCommand : ICommand
                 });
                 ConsoleTable.From(rows, "Endung", "Größe", "Dateien", "%").Write();
                 Console.WriteLine($"\nGesamt (gefiltert): {DiskAnalyzer.FormatSize(extTotal)}");
+            }
+
+            if (htmlPath is not null)
+            {
+                var rcHtml = WriteHtmlReport(ctx, analyzer, path, filter, htmlPath);
+                if (rcHtml != 0) return rcHtml;
             }
 
             if (exportFormat is not null)
@@ -188,6 +211,12 @@ public sealed class AnalyzeDiskCommand : ICommand
             }
         }
 
+        if (htmlPath is not null)
+        {
+            var rcHtml = WriteHtmlReport(ctx, analyzer, path, filter, htmlPath);
+            if (rcHtml != 0) return rcHtml;
+        }
+
         if (exportFormat is not null)
         {
             // Export bleibt auch mit --snapshot auf die angezeigten Top-N begrenzt.
@@ -196,6 +225,42 @@ public sealed class AnalyzeDiskCommand : ICommand
             return ExportTopLevel(ctx, path, exportAnalysis, exportFormat, outPath);
         }
 
+        return 0;
+    }
+
+    // ---- Interaktiver HTML-Treemap-Report (--html) ----
+
+    /// <summary>
+    /// Schreibt den selbst-enthaltenen HTML-Report (Treemap + Tabellen). Nutzt
+    /// denselben Filter wie die normale Ausgabe; Baum UND Endungs-Aufschlüsselung
+    /// entstehen in einem einzigen Scan (<see cref="DiskAnalyzer.AnalyzeTree"/>).
+    /// </summary>
+    private static int WriteHtmlReport(CommandContext ctx, DiskAnalyzer analyzer, string root,
+                                       DiskFilter filter, string htmlPath)
+    {
+        var activeFilter = filter.IsActive ? filter : null;
+        var extensions = new ExtensionAnalysis();
+        var tree = analyzer.AnalyzeTree(root, maxDepth: 4, activeFilter,
+                                        extensionsOut: extensions, extensionsTopN: 20);
+
+        var html = HtmlReportWriter.Build(new HtmlReportData
+        {
+            RootPath = Path.GetFullPath(root),
+            GeneratedAt = DateTime.Now,
+            Tree = tree,
+            Extensions = extensions
+        });
+
+        try
+        {
+            File.WriteAllText(htmlPath, html, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            ctx.Logger.Info($"HTML-Report geschrieben: {Path.GetFullPath(htmlPath)}");
+        }
+        catch (Exception ex)
+        {
+            ctx.Logger.Error($"HTML-Report konnte nicht geschrieben werden: {ex.Message}");
+            return 2;
+        }
         return 0;
     }
 
@@ -318,13 +383,9 @@ public sealed class AnalyzeDiskCommand : ICommand
         return sb.ToString();
     }
 
-    /// <summary>Maskiert HTML-Sonderzeichen, damit Pfade/Endungen sicher im Report stehen.</summary>
-    private static string HtmlEscape(string value) => value
-        .Replace("&", "&amp;")
-        .Replace("<", "&lt;")
-        .Replace(">", "&gt;")
-        .Replace("\"", "&quot;")
-        .Replace("'", "&#39;");
+    /// <summary>Maskiert HTML-Sonderzeichen, damit Pfade/Endungen sicher im Report stehen
+    /// (geteilter Helfer mit dem Treemap-Report).</summary>
+    private static string HtmlEscape(string value) => HtmlReportWriter.Esc(value);
 
     /// <summary>Zerlegt eine kommagetrennte Endungsliste in normalisierte Endungen (klein, mit Punkt).</summary>
     private static IReadOnlyCollection<string> ParseExtensions(string raw)
